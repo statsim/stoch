@@ -1,0 +1,7 @@
+export { Kernel } from './kernel'
+export { SquaredExponential } from './squared_exponential'
+export { Matern } from './matern'
+export { Linear } from './linear'
+export { Periodic } from './periodic'
+export { White } from './white'
+export { Add, Product, Scale } from './combinators'

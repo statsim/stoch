@@ -1,0 +1,7 @@
+node_modules/
+dist/
+reference/
+tests/reference-data/*.json
+coverage/
+*.log
+.DS_Store

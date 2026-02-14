@@ -1,0 +1,633 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>stoch — NUTS Explorer</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { width: 100%; height: 100%; overflow: hidden; background: #000; }
+  canvas { display: block; width: 100vw; height: 100vh; }
+
+  .overlay {
+    position: fixed;
+    top: 16px;
+    left: 16px;
+    background: rgba(13, 17, 23, 0.85);
+    border: 1px solid rgba(48, 54, 61, 0.6);
+    border-radius: 8px;
+    padding: 14px 18px;
+    font-family: 'SF Mono', 'Fira Code', monospace;
+    font-size: 12px;
+    color: #e1e4e8;
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
+    pointer-events: none;
+    z-index: 10;
+  }
+  .overlay .title {
+    font-family: 'Segoe UI', system-ui, sans-serif;
+    font-size: 16px;
+    font-weight: 600;
+    color: #f0f6fc;
+    margin-bottom: 8px;
+  }
+  .overlay .subtitle {
+    font-family: 'Segoe UI', system-ui, sans-serif;
+    font-size: 11px;
+    color: #8b949e;
+    margin-bottom: 10px;
+  }
+  .overlay .stat {
+    margin-bottom: 3px;
+    display: flex;
+    justify-content: space-between;
+    gap: 16px;
+  }
+  .overlay .stat .label { color: #8b949e; }
+  .overlay .stat .value { color: #79c0ff; text-align: right; }
+  .overlay .stat .value.green { color: #3fb950; }
+  .overlay .stat .value.yellow { color: #d29922; }
+  .overlay .stat .value.red { color: #f85149; }
+
+  .controls {
+    position: fixed;
+    top: 16px;
+    right: 16px;
+    display: flex;
+    gap: 8px;
+    z-index: 10;
+  }
+  .controls button, .controls select {
+    font-family: 'Segoe UI', system-ui, sans-serif;
+    font-size: 12px;
+    padding: 6px 14px;
+    border: 1px solid #30363d;
+    border-radius: 6px;
+    background: rgba(13, 17, 23, 0.85);
+    color: #e1e4e8;
+    cursor: pointer;
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
+    outline: none;
+    transition: border-color 0.15s;
+  }
+  .controls button:hover, .controls select:hover {
+    border-color: #58a6ff;
+  }
+  .controls select option { background: #161b22; }
+
+  .loading {
+    position: fixed;
+    inset: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    background: #0d1117;
+    z-index: 100;
+    font-family: 'Segoe UI', system-ui, sans-serif;
+    color: #8b949e;
+    font-size: 14px;
+    gap: 12px;
+    transition: opacity 0.4s;
+  }
+  .loading .spinner {
+    width: 28px;
+    height: 28px;
+    border: 3px solid #30363d;
+    border-top-color: #58a6ff;
+    border-radius: 50%;
+    animation: spin 0.8s linear infinite;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+</style>
+</head>
+<body>
+
+<div class="loading" id="loading">
+  <div class="spinner"></div>
+  <div id="load-status">Loading TensorFlow.js...</div>
+</div>
+
+<canvas id="canvas"></canvas>
+
+<div class="overlay" id="overlay" style="display:none">
+  <div class="title">NUTS Explorer</div>
+  <div class="subtitle">Rosenbrock distribution &mdash; log p(x,y) = -&frac12;[(x-1)&sup2; + 10(y-x&sup2;)&sup2;]</div>
+  <div class="stat"><span class="label">Step</span><span class="value" id="s-step">0</span></div>
+  <div class="stat"><span class="label">Samples</span><span class="value" id="s-samples">0</span></div>
+  <div class="stat"><span class="label">Tree depth</span><span class="value" id="s-depth">-</span></div>
+  <div class="stat"><span class="label">Leapfrogs</span><span class="value" id="s-leapfrogs">-</span></div>
+  <div class="stat"><span class="label">Accept rate</span><span class="value" id="s-accept">-</span></div>
+  <div class="stat"><span class="label">Step size</span><span class="value" id="s-stepsize">-</span></div>
+  <div class="stat"><span class="label">Position</span><span class="value" id="s-pos">-</span></div>
+  <div class="stat"><span class="label">Tensors</span><span class="value" id="s-tensors">-</span></div>
+</div>
+
+<div class="controls" id="controls" style="display:none">
+  <button id="btn-pause">Pause</button>
+  <select id="sel-speed">
+    <option value="1" selected>1 step/frame</option>
+    <option value="3">3 steps/frame</option>
+    <option value="10">10 steps/frame</option>
+    <option value="30">30 steps/frame</option>
+  </select>
+  <select id="sel-dist">
+    <option value="rosenbrock" selected>Rosenbrock</option>
+    <option value="bimodal">Bimodal</option>
+    <option value="donut">Donut</option>
+  </select>
+  <button id="btn-reset">Reset</button>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4/dist/tf.min.js"></script>
+<script src="../dist/stoch.min.js"></script>
+<script>
+'use strict'
+
+// ── Color palette (viridis-like) ───────────────────────────────
+
+const PALETTE = [
+  [13, 8, 35],
+  [32, 12, 74],
+  [56, 15, 110],
+  [82, 18, 125],
+  [109, 22, 127],
+  [134, 33, 121],
+  [158, 48, 109],
+  [180, 65, 94],
+  [200, 84, 78],
+  [218, 108, 60],
+  [232, 135, 42],
+  [242, 167, 25],
+  [248, 200, 32],
+  [249, 233, 70],
+  [245, 255, 125]
+]
+
+function colorFromLogProb(lp, lpMin, lpMax) {
+  const t = Math.max(0, Math.min(1, (lp - lpMin) / (lpMax - lpMin)))
+  const idx = t * (PALETTE.length - 1)
+  const lo = Math.floor(idx)
+  const hi = Math.min(lo + 1, PALETTE.length - 1)
+  const frac = idx - lo
+  return [
+    Math.round(PALETTE[lo][0] + (PALETTE[hi][0] - PALETTE[lo][0]) * frac),
+    Math.round(PALETTE[lo][1] + (PALETTE[hi][1] - PALETTE[lo][1]) * frac),
+    Math.round(PALETTE[lo][2] + (PALETTE[hi][2] - PALETTE[lo][2]) * frac)
+  ]
+}
+
+// ── Target distributions ───────────────────────────────────────
+
+const DISTRIBUTIONS = {
+  rosenbrock: {
+    label: 'Rosenbrock',
+    xRange: [-2, 4],
+    yRange: [-2, 12],
+    init: [0, 0],
+    stepSize: 0.03,
+    // Scalar version for NUTS kernel
+    logProb(xy) {
+      return tf.tidy(() => {
+        const x = tf.slice(xy, [0], [1]).squeeze()
+        const y = tf.slice(xy, [1], [1]).squeeze()
+        const t1 = tf.square(tf.sub(x, 1))
+        const t2 = tf.mul(10, tf.square(tf.sub(y, tf.square(x))))
+        return tf.mul(-0.5, tf.add(t1, t2))
+      })
+    },
+    // Batched version for heatmap (plain JS, fast)
+    batchLogProb(xArr, yArr) {
+      const out = new Float32Array(xArr.length)
+      for (let i = 0; i < xArr.length; i++) {
+        const x = xArr[i], y = yArr[i]
+        out[i] = -0.5 * ((x - 1) ** 2 + 10 * (y - x * x) ** 2)
+      }
+      return out
+    }
+  },
+  bimodal: {
+    label: 'Bimodal Gaussian',
+    xRange: [-5, 7],
+    yRange: [-5, 7],
+    init: [0, 0],
+    stepSize: 0.08,
+    logProb(xy) {
+      return tf.tidy(() => {
+        const x = tf.slice(xy, [0], [1]).squeeze()
+        const y = tf.slice(xy, [1], [1]).squeeze()
+        // Mixture of two 2D Gaussians
+        const lp1 = tf.mul(-0.5, tf.add(tf.square(tf.sub(x, -1.5)), tf.square(tf.sub(y, -1.5))))
+        const lp2 = tf.mul(-0.5, tf.add(tf.square(tf.sub(x, 3)), tf.square(tf.sub(y, 3))))
+        // logSumExp for mixture
+        const maxLP = tf.maximum(lp1, lp2)
+        return tf.add(maxLP, tf.log(tf.add(
+          tf.exp(tf.sub(lp1, maxLP)),
+          tf.exp(tf.sub(lp2, maxLP))
+        )))
+      })
+    },
+    batchLogProb(xArr, yArr) {
+      const out = new Float32Array(xArr.length)
+      for (let i = 0; i < xArr.length; i++) {
+        const x = xArr[i], y = yArr[i]
+        const lp1 = -0.5 * ((x + 1.5) ** 2 + (y + 1.5) ** 2)
+        const lp2 = -0.5 * ((x - 3) ** 2 + (y - 3) ** 2)
+        const m = Math.max(lp1, lp2)
+        out[i] = m + Math.log(Math.exp(lp1 - m) + Math.exp(lp2 - m))
+      }
+      return out
+    }
+  },
+  donut: {
+    label: 'Donut',
+    xRange: [-5, 5],
+    yRange: [-5, 5],
+    init: [2.5, 0],
+    stepSize: 0.05,
+    logProb(xy) {
+      return tf.tidy(() => {
+        const x = tf.slice(xy, [0], [1]).squeeze()
+        const y = tf.slice(xy, [1], [1]).squeeze()
+        const r = tf.sqrt(tf.add(tf.square(x), tf.square(y)))
+        return tf.mul(-2, tf.square(tf.sub(r, 2.5)))
+      })
+    },
+    batchLogProb(xArr, yArr) {
+      const out = new Float32Array(xArr.length)
+      for (let i = 0; i < xArr.length; i++) {
+        const r = Math.sqrt(xArr[i] ** 2 + yArr[i] ** 2)
+        out[i] = -2 * (r - 2.5) ** 2
+      }
+      return out
+    }
+  }
+}
+
+// ── State ──────────────────────────────────────────────────────
+
+let currentDist = 'rosenbrock'
+let running = true
+let stepsPerFrame = 1
+let state = null
+let kr = null
+let nutsKernel = null
+let collectedSamples = []
+let stepCount = 0
+let totalAccepted = 0
+let heatmapImageData = null
+let canvasW = 0, canvasH = 0
+let animId = null
+
+// ── Canvas setup ───────────────────────────────────────────────
+
+const canvas = document.getElementById('canvas')
+const ctx = canvas.getContext('2d')
+
+function resizeCanvas() {
+  const dpr = window.devicePixelRatio || 1
+  canvasW = window.innerWidth
+  canvasH = window.innerHeight
+  canvas.width = canvasW * dpr
+  canvas.height = canvasH * dpr
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
+}
+
+window.addEventListener('resize', () => {
+  resizeCanvas()
+  heatmapImageData = null // force recompute
+})
+
+// ── Coordinate transforms ──────────────────────────────────────
+
+function getDistConfig() { return DISTRIBUTIONS[currentDist] }
+
+function worldToCanvas(wx, wy) {
+  const d = getDistConfig()
+  const px = (wx - d.xRange[0]) / (d.xRange[1] - d.xRange[0]) * canvasW
+  const py = canvasH - (wy - d.yRange[0]) / (d.yRange[1] - d.yRange[0]) * canvasH
+  return [px, py]
+}
+
+// ── Heatmap ────────────────────────────────────────────────────
+
+function computeHeatmap() {
+  const d = getDistConfig()
+  const res = 300
+  const xArr = new Float32Array(res * res)
+  const yArr = new Float32Array(res * res)
+
+  for (let row = 0; row < res; row++) {
+    for (let col = 0; col < res; col++) {
+      const idx = row * res + col
+      xArr[idx] = d.xRange[0] + (d.xRange[1] - d.xRange[0]) * col / (res - 1)
+      yArr[idx] = d.yRange[1] - (d.yRange[1] - d.yRange[0]) * row / (res - 1)
+    }
+  }
+
+  const lpArr = d.batchLogProb(xArr, yArr)
+
+  // Find range for color mapping (clip outliers)
+  let lpMax = -Infinity
+  for (let i = 0; i < lpArr.length; i++) {
+    if (lpArr[i] > lpMax) lpMax = lpArr[i]
+  }
+  const lpMin = lpMax - 12  // show ~6 std devs of density
+
+  // Create ImageData at heatmap resolution
+  const imgData = new ImageData(res, res)
+  for (let i = 0; i < lpArr.length; i++) {
+    const [r, g, b] = colorFromLogProb(lpArr[i], lpMin, lpMax)
+    imgData.data[i * 4 + 0] = r
+    imgData.data[i * 4 + 1] = g
+    imgData.data[i * 4 + 2] = b
+    imgData.data[i * 4 + 3] = 255
+  }
+
+  // Draw to offscreen canvas, then scale
+  const offscreen = document.createElement('canvas')
+  offscreen.width = res
+  offscreen.height = res
+  offscreen.getContext('2d').putImageData(imgData, 0, 0)
+
+  heatmapImageData = offscreen
+}
+
+// ── Drawing ────────────────────────────────────────────────────
+
+function drawFrame() {
+  // Heatmap background (scaled to fill canvas)
+  if (heatmapImageData) {
+    ctx.imageSmoothingEnabled = true
+    ctx.imageSmoothingQuality = 'high'
+    ctx.drawImage(heatmapImageData, 0, 0, canvasW, canvasH)
+  }
+
+  // Sample trail — draw segments with increasing opacity to show flow direction
+  const n = collectedSamples.length
+  if (n > 1) {
+    // Only show recent trail (last 200 segments) to keep it readable
+    const trailLen = Math.min(n - 1, 200)
+    const start = n - 1 - trailLen
+    ctx.lineCap = 'round'
+    ctx.lineJoin = 'round'
+    for (let i = start; i < n - 1; i++) {
+      const t = (i - start) / trailLen  // 0..1
+      const alpha = 0.04 + 0.3 * t
+      const width = 1 + 1.5 * t
+      ctx.strokeStyle = `rgba(88, 166, 255, ${alpha.toFixed(2)})`
+      ctx.lineWidth = width
+      const [x1, y1] = worldToCanvas(collectedSamples[i][0], collectedSamples[i][1])
+      const [x2, y2] = worldToCanvas(collectedSamples[i + 1][0], collectedSamples[i + 1][1])
+      ctx.beginPath()
+      ctx.moveTo(x1, y1)
+      ctx.lineTo(x2, y2)
+      ctx.stroke()
+    }
+  }
+
+  // Sample dots — only recent ones for clarity
+  const dotStart = Math.max(0, n - 150)
+  for (let i = dotStart; i < n; i++) {
+    const [px, py] = worldToCanvas(collectedSamples[i][0], collectedSamples[i][1])
+    const t = (i - dotStart) / Math.max(1, n - dotStart)
+    const alpha = 0.15 + 0.6 * t
+    const radius = 1.5 + 1.5 * t
+    ctx.fillStyle = `rgba(88, 166, 255, ${alpha.toFixed(2)})`
+    ctx.beginPath()
+    ctx.arc(px, py, radius, 0, Math.PI * 2)
+    ctx.fill()
+  }
+
+  // Current position (bright dot with glow)
+  if (collectedSamples.length > 0) {
+    const last = collectedSamples[collectedSamples.length - 1]
+    const [px, py] = worldToCanvas(last[0], last[1])
+
+    // Glow
+    const grad = ctx.createRadialGradient(px, py, 0, px, py, 16)
+    grad.addColorStop(0, 'rgba(248, 200, 32, 0.5)')
+    grad.addColorStop(1, 'rgba(248, 200, 32, 0)')
+    ctx.fillStyle = grad
+    ctx.beginPath()
+    ctx.arc(px, py, 16, 0, Math.PI * 2)
+    ctx.fill()
+
+    // Dot
+    ctx.fillStyle = '#f8c820'
+    ctx.beginPath()
+    ctx.arc(px, py, 4, 0, Math.PI * 2)
+    ctx.fill()
+    ctx.strokeStyle = '#fff'
+    ctx.lineWidth = 1
+    ctx.stroke()
+  }
+}
+
+// ── Kernel result disposal ─────────────────────────────────────
+
+function disposeKR(kernelResults) {
+  if (!kernelResults) return
+  // Handle DualAveraging wrapper
+  if (kernelResults.innerResults) {
+    disposeKR(kernelResults.innerResults)
+    return
+  }
+  // Handle TransformedKernel wrapper
+  if (kernelResults.unconstrainedState) {
+    if (kernelResults.unconstrainedState instanceof tf.Tensor) {
+      kernelResults.unconstrainedState.dispose()
+    }
+    if (kernelResults.innerResults) {
+      disposeKR(kernelResults.innerResults)
+    }
+  }
+  if (kernelResults.targetLogProb && !kernelResults.targetLogProb.isDisposed) {
+    kernelResults.targetLogProb.dispose()
+  }
+  if (kernelResults.gradsTargetLogProb) {
+    const g = kernelResults.gradsTargetLogProb
+    if (g instanceof tf.Tensor) {
+      if (!g.isDisposed) g.dispose()
+    } else if (typeof g === 'object') {
+      for (const v of Object.values(g)) {
+        if (v instanceof tf.Tensor && !v.isDisposed) v.dispose()
+      }
+    }
+  }
+  if (kernelResults.isAccepted && kernelResults.isAccepted instanceof tf.Tensor && !kernelResults.isAccepted.isDisposed) {
+    kernelResults.isAccepted.dispose()
+  }
+  if (kernelResults.logAcceptRatio && kernelResults.logAcceptRatio instanceof tf.Tensor && !kernelResults.logAcceptRatio.isDisposed) {
+    kernelResults.logAcceptRatio.dispose()
+  }
+  if (kernelResults.stepSize && kernelResults.stepSize instanceof tf.Tensor && !kernelResults.stepSize.isDisposed) {
+    kernelResults.stepSize.dispose()
+  }
+}
+
+// ── Stats update ───────────────────────────────────────────────
+
+function updateStats(kernelResults) {
+  document.getElementById('s-step').textContent = stepCount
+  document.getElementById('s-samples').textContent = collectedSamples.length
+
+  if (kernelResults) {
+    // Dig into wrapper layers to find NUTS results
+    let nutsKR = kernelResults
+    if (nutsKR.innerResults) nutsKR = nutsKR.innerResults  // DualAveraging
+    if (nutsKR.innerResults) nutsKR = nutsKR.innerResults  // TransformedKernel
+
+    if (nutsKR.leapfrogsTaken !== undefined) {
+      document.getElementById('s-leapfrogs').textContent = nutsKR.leapfrogsTaken
+      // Estimate tree depth from leapfrogs taken
+      const depth = Math.round(Math.log2(Math.max(1, nutsKR.leapfrogsTaken)))
+      document.getElementById('s-depth').textContent = depth
+    }
+
+    const ar = stepCount > 0 ? (totalAccepted / stepCount).toFixed(3) : '-'
+    const arEl = document.getElementById('s-accept')
+    arEl.textContent = ar
+    const arVal = parseFloat(ar)
+    arEl.className = 'value' + (arVal > 0.6 ? ' green' : arVal > 0.3 ? ' yellow' : ' red')
+
+    if (nutsKR.stepSize) {
+      const ss = nutsKR.stepSize instanceof tf.Tensor ? nutsKR.stepSize.dataSync()[0] : nutsKR.stepSize
+      document.getElementById('s-stepsize').textContent = ss.toFixed(4)
+    }
+  }
+
+  if (collectedSamples.length > 0) {
+    const last = collectedSamples[collectedSamples.length - 1]
+    document.getElementById('s-pos').textContent = `(${last[0].toFixed(2)}, ${last[1].toFixed(2)})`
+  }
+
+  document.getElementById('s-tensors').textContent = tf.memory().numTensors
+}
+
+// ── Initialization ─────────────────────────────────────────────
+
+function initKernel() {
+  // Dispose old state
+  if (state && !state.isDisposed) state.dispose()
+  if (kr) disposeKR(kr)
+
+  const d = getDistConfig()
+  nutsKernel = new stoch.mcmc.NoUTurnSampler({
+    targetLogProbFn: d.logProb,
+    stepSize: d.stepSize,
+    maxTreeDepth: 4
+  })
+
+  state = tf.tensor1d(d.init)
+  kr = nutsKernel.bootstrapResults(state)
+  collectedSamples = []
+  stepCount = 0
+  totalAccepted = 0
+}
+
+// ── Animation loop ─────────────────────────────────────────────
+
+function takeStep() {
+  const { nextState, kernelResults } = nutsKernel.oneStep(state, kr)
+
+  // Extract position
+  const pos = nextState.dataSync()
+  collectedSamples.push([pos[0], pos[1]])
+  stepCount++
+  totalAccepted++ // NUTS always accepts
+
+  // Dispose old state and kernel results
+  if (!state.isDisposed) state.dispose()
+  disposeKR(kr)
+
+  state = nextState
+  kr = kernelResults
+
+  return kernelResults
+}
+
+function animate() {
+  if (!running) {
+    animId = requestAnimationFrame(animate)
+    drawFrame()
+    return
+  }
+
+  let lastKR = null
+  for (let i = 0; i < stepsPerFrame; i++) {
+    lastKR = takeStep()
+  }
+
+  drawFrame()
+  updateStats(lastKR)
+
+  animId = requestAnimationFrame(animate)
+}
+
+// ── Controls ───────────────────────────────────────────────────
+
+function setupControls() {
+  document.getElementById('btn-pause').addEventListener('click', () => {
+    running = !running
+    document.getElementById('btn-pause').textContent = running ? 'Pause' : 'Play'
+  })
+
+  document.getElementById('sel-speed').addEventListener('change', (e) => {
+    stepsPerFrame = parseInt(e.target.value)
+  })
+
+  document.getElementById('sel-dist').addEventListener('change', (e) => {
+    currentDist = e.target.value
+    initKernel()
+    heatmapImageData = null
+    computeHeatmap()
+    drawFrame()
+    updateStats(null)
+  })
+
+  document.getElementById('btn-reset').addEventListener('click', () => {
+    initKernel()
+    drawFrame()
+    updateStats(null)
+  })
+}
+
+// ── Main ───────────────────────────────────────────────────────
+
+async function main() {
+  await tf.ready()
+  document.getElementById('load-status').textContent = 'Computing density heatmap...'
+
+  resizeCanvas()
+
+  await new Promise(r => setTimeout(r, 50))
+  computeHeatmap()
+
+  await new Promise(r => setTimeout(r, 50))
+  document.getElementById('load-status').textContent = 'Initializing NUTS sampler...'
+
+  initKernel()
+  setupControls()
+
+  // Hide loading, show UI
+  const loadEl = document.getElementById('loading')
+  loadEl.style.opacity = '0'
+  setTimeout(() => loadEl.style.display = 'none', 400)
+  document.getElementById('overlay').style.display = ''
+  document.getElementById('controls').style.display = ''
+
+  // Start animation
+  animate()
+}
+
+main().catch(err => {
+  document.getElementById('load-status').textContent = 'Error: ' + err.message
+  console.error(err)
+})
+</script>
+
+</body>
+</html>

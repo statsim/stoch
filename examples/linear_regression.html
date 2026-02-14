@@ -1,0 +1,525 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>stoch — Bayesian Linear Regression</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+    background: #0f1117;
+    color: #e1e4e8;
+    min-height: 100vh;
+    padding: 24px;
+  }
+  h1 {
+    font-size: 28px;
+    font-weight: 600;
+    margin-bottom: 4px;
+    color: #f0f6fc;
+  }
+  .subtitle {
+    color: #8b949e;
+    font-size: 14px;
+    margin-bottom: 24px;
+  }
+  .panels {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 20px;
+    margin-bottom: 20px;
+  }
+  .panel {
+    background: #161b22;
+    border: 1px solid #30363d;
+    border-radius: 8px;
+    padding: 16px;
+  }
+  .panel h2 {
+    font-size: 14px;
+    font-weight: 600;
+    color: #8b949e;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    margin-bottom: 12px;
+  }
+  canvas {
+    width: 100%;
+    border-radius: 4px;
+    background: #0d1117;
+  }
+  #status {
+    background: #161b22;
+    border: 1px solid #30363d;
+    border-radius: 8px;
+    padding: 16px;
+    margin-bottom: 20px;
+    font-family: 'SF Mono', 'Fira Code', monospace;
+    font-size: 13px;
+    color: #58a6ff;
+    min-height: 44px;
+    display: flex;
+    align-items: center;
+  }
+  #status .spinner {
+    display: inline-block;
+    width: 14px;
+    height: 14px;
+    border: 2px solid #30363d;
+    border-top-color: #58a6ff;
+    border-radius: 50%;
+    animation: spin 0.8s linear infinite;
+    margin-right: 10px;
+    flex-shrink: 0;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    font-family: 'SF Mono', 'Fira Code', monospace;
+    font-size: 13px;
+  }
+  th {
+    text-align: left;
+    padding: 8px 12px;
+    border-bottom: 1px solid #30363d;
+    color: #8b949e;
+    font-weight: 500;
+  }
+  td {
+    padding: 8px 12px;
+    border-bottom: 1px solid #21262d;
+  }
+  td.value { color: #79c0ff; }
+  td.true-val { color: #3fb950; }
+  .histograms {
+    display: grid;
+    grid-template-columns: 1fr 1fr 1fr;
+    gap: 20px;
+  }
+  @media (max-width: 900px) {
+    .panels { grid-template-columns: 1fr; }
+    .histograms { grid-template-columns: 1fr; }
+  }
+</style>
+</head>
+<body>
+
+<h1>Bayesian Linear Regression</h1>
+<p class="subtitle">
+  Inferring parameters of y = 4x + 2 using Hamiltonian Monte Carlo (stoch)
+</p>
+
+<div id="status"><span class="spinner"></span> Loading TensorFlow.js...</div>
+
+<div class="panels">
+  <div class="panel">
+    <h2>Data &amp; Posterior Fit</h2>
+    <canvas id="scatter" width="600" height="400"></canvas>
+  </div>
+  <div class="panel">
+    <h2>Summary</h2>
+    <table id="summary">
+      <thead>
+        <tr><th>Parameter</th><th>True</th><th>Mean</th><th>Std</th><th>95% CI</th></tr>
+      </thead>
+      <tbody id="summary-body">
+        <tr><td colspan="5" style="color:#8b949e">Waiting for inference...</td></tr>
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<div class="histograms">
+  <div class="panel">
+    <h2>Slope Posterior</h2>
+    <canvas id="hist-slope" width="400" height="250"></canvas>
+  </div>
+  <div class="panel">
+    <h2>Intercept Posterior</h2>
+    <canvas id="hist-intercept" width="400" height="250"></canvas>
+  </div>
+  <div class="panel">
+    <h2>Sigma Posterior</h2>
+    <canvas id="hist-sigma" width="400" height="250"></canvas>
+  </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4/dist/tf.min.js"></script>
+<script src="../dist/stoch.min.js"></script>
+<script>
+'use strict'
+
+// ── Helpers ────────────────────────────────────────────────────
+
+function setStatus(msg, done) {
+  const el = document.getElementById('status')
+  if (done) {
+    el.innerHTML = '<span style="color:#3fb950">&#10003;</span>&nbsp; ' + msg
+  } else {
+    el.innerHTML = '<span class="spinner"></span> ' + msg
+  }
+}
+
+function percentile(arr, p) {
+  const sorted = [...arr].sort((a, b) => a - b)
+  const idx = Math.floor(sorted.length * p)
+  return sorted[Math.min(idx, sorted.length - 1)]
+}
+
+function mean(arr) {
+  return arr.reduce((a, b) => a + b, 0) / arr.length
+}
+
+function std(arr) {
+  const m = mean(arr)
+  return Math.sqrt(arr.reduce((s, x) => s + (x - m) ** 2, 0) / (arr.length - 1))
+}
+
+// ── Canvas drawing ─────────────────────────────────────────────
+
+function setupCanvas(canvas) {
+  const dpr = window.devicePixelRatio || 1
+  const rect = canvas.getBoundingClientRect()
+  canvas.width = rect.width * dpr
+  canvas.height = rect.height * dpr
+  const ctx = canvas.getContext('2d')
+  ctx.scale(dpr, dpr)
+  return { ctx, w: rect.width, h: rect.height }
+}
+
+function drawScatter(canvasId, xs, ys, lines, trueSlope, trueIntercept) {
+  const canvas = document.getElementById(canvasId)
+  const { ctx, w, h } = setupCanvas(canvas)
+  const pad = { top: 20, right: 20, bottom: 40, left: 50 }
+  const pw = w - pad.left - pad.right
+  const ph = h - pad.top - pad.bottom
+
+  const xMin = Math.min(...xs) - 0.2
+  const xMax = Math.max(...xs) + 0.2
+  const yMin = Math.min(...ys) - 1
+  const yMax = Math.max(...ys) + 1
+
+  function toX(v) { return pad.left + (v - xMin) / (xMax - xMin) * pw }
+  function toY(v) { return pad.top + ph - (v - yMin) / (yMax - yMin) * ph }
+
+  // Background
+  ctx.fillStyle = '#0d1117'
+  ctx.fillRect(0, 0, w, h)
+
+  // Grid
+  ctx.strokeStyle = '#21262d'
+  ctx.lineWidth = 1
+  for (let i = 0; i <= 4; i++) {
+    const y = pad.top + (ph / 4) * i
+    ctx.beginPath(); ctx.moveTo(pad.left, y); ctx.lineTo(w - pad.right, y); ctx.stroke()
+    const x = pad.left + (pw / 4) * i
+    ctx.beginPath(); ctx.moveTo(x, pad.top); ctx.lineTo(x, pad.top + ph); ctx.stroke()
+  }
+
+  // Axis labels
+  ctx.fillStyle = '#8b949e'
+  ctx.font = '11px system-ui'
+  ctx.textAlign = 'center'
+  for (let i = 0; i <= 4; i++) {
+    const v = xMin + (xMax - xMin) * i / 4
+    ctx.fillText(v.toFixed(1), pad.left + (pw / 4) * i, h - pad.bottom + 16)
+  }
+  ctx.textAlign = 'right'
+  for (let i = 0; i <= 4; i++) {
+    const v = yMin + (yMax - yMin) * i / 4
+    ctx.fillText(v.toFixed(1), pad.left - 8, pad.top + ph - (ph / 4) * i + 4)
+  }
+
+  // Posterior regression lines (thin, semi-transparent)
+  if (lines && lines.length > 0) {
+    ctx.globalAlpha = 0.08
+    ctx.strokeStyle = '#f97583'
+    ctx.lineWidth = 1
+    for (const { slope, intercept } of lines) {
+      ctx.beginPath()
+      ctx.moveTo(toX(xMin), toY(slope * xMin + intercept))
+      ctx.lineTo(toX(xMax), toY(slope * xMax + intercept))
+      ctx.stroke()
+    }
+    ctx.globalAlpha = 1
+  }
+
+  // True line
+  ctx.strokeStyle = '#3fb950'
+  ctx.lineWidth = 2
+  ctx.setLineDash([6, 4])
+  ctx.beginPath()
+  ctx.moveTo(toX(xMin), toY(trueSlope * xMin + trueIntercept))
+  ctx.lineTo(toX(xMax), toY(trueSlope * xMax + trueIntercept))
+  ctx.stroke()
+  ctx.setLineDash([])
+
+  // Mean posterior line
+  if (lines && lines.length > 0) {
+    const avgSlope = mean(lines.map(l => l.slope))
+    const avgIntercept = mean(lines.map(l => l.intercept))
+    ctx.strokeStyle = '#f97583'
+    ctx.lineWidth = 2.5
+    ctx.beginPath()
+    ctx.moveTo(toX(xMin), toY(avgSlope * xMin + avgIntercept))
+    ctx.lineTo(toX(xMax), toY(avgSlope * xMax + avgIntercept))
+    ctx.stroke()
+  }
+
+  // Data points
+  ctx.fillStyle = '#58a6ff'
+  for (let i = 0; i < xs.length; i++) {
+    ctx.beginPath()
+    ctx.arc(toX(xs[i]), toY(ys[i]), 4, 0, Math.PI * 2)
+    ctx.fill()
+  }
+
+  // Legend
+  const lx = pad.left + 10, ly = pad.top + 14
+  ctx.font = '11px system-ui'
+  ctx.fillStyle = '#58a6ff'
+  ctx.beginPath(); ctx.arc(lx, ly, 3, 0, Math.PI * 2); ctx.fill()
+  ctx.fillStyle = '#8b949e'
+  ctx.textAlign = 'left'
+  ctx.fillText('Data', lx + 8, ly + 4)
+
+  ctx.strokeStyle = '#3fb950'; ctx.lineWidth = 2; ctx.setLineDash([4, 3])
+  ctx.beginPath(); ctx.moveTo(lx - 6, ly + 18); ctx.lineTo(lx + 6, ly + 18); ctx.stroke()
+  ctx.setLineDash([])
+  ctx.fillText('True (y=4x+2)', lx + 8, ly + 22)
+
+  if (lines && lines.length > 0) {
+    ctx.strokeStyle = '#f97583'; ctx.lineWidth = 2.5
+    ctx.beginPath(); ctx.moveTo(lx - 6, ly + 36); ctx.lineTo(lx + 6, ly + 36); ctx.stroke()
+    ctx.fillText('Posterior mean', lx + 8, ly + 40)
+  }
+}
+
+function drawHistogram(canvasId, values, trueValue, label) {
+  const canvas = document.getElementById(canvasId)
+  const { ctx, w, h } = setupCanvas(canvas)
+  const pad = { top: 10, right: 20, bottom: 40, left: 50 }
+  const pw = w - pad.left - pad.right
+  const ph = h - pad.top - pad.bottom
+
+  const nBins = 30
+  const vMin = Math.min(...values)
+  const vMax = Math.max(...values)
+  const range = vMax - vMin || 1
+  const binWidth = range / nBins
+  const bins = new Array(nBins).fill(0)
+
+  for (const v of values) {
+    const idx = Math.min(Math.floor((v - vMin) / binWidth), nBins - 1)
+    bins[idx]++
+  }
+
+  const maxCount = Math.max(...bins)
+
+  // Background
+  ctx.fillStyle = '#0d1117'
+  ctx.fillRect(0, 0, w, h)
+
+  // Bars
+  ctx.fillStyle = '#1f6feb'
+  for (let i = 0; i < nBins; i++) {
+    const x = pad.left + (i / nBins) * pw
+    const barH = (bins[i] / maxCount) * ph
+    ctx.fillRect(x, pad.top + ph - barH, pw / nBins - 1, barH)
+  }
+
+  // True value line
+  const trueX = pad.left + ((trueValue - vMin) / range) * pw
+  ctx.strokeStyle = '#3fb950'
+  ctx.lineWidth = 2
+  ctx.setLineDash([4, 3])
+  ctx.beginPath()
+  ctx.moveTo(trueX, pad.top)
+  ctx.lineTo(trueX, pad.top + ph)
+  ctx.stroke()
+  ctx.setLineDash([])
+
+  // Posterior mean line
+  const m = mean(values)
+  const meanX = pad.left + ((m - vMin) / range) * pw
+  ctx.strokeStyle = '#f97583'
+  ctx.lineWidth = 2
+  ctx.beginPath()
+  ctx.moveTo(meanX, pad.top)
+  ctx.lineTo(meanX, pad.top + ph)
+  ctx.stroke()
+
+  // X-axis labels
+  ctx.fillStyle = '#8b949e'
+  ctx.font = '11px system-ui'
+  ctx.textAlign = 'center'
+  for (let i = 0; i <= 4; i++) {
+    const v = vMin + range * i / 4
+    ctx.fillText(v.toFixed(2), pad.left + (pw / 4) * i, h - pad.bottom + 16)
+  }
+
+  // Legend
+  ctx.font = '11px system-ui'
+  ctx.textAlign = 'right'
+  ctx.fillStyle = '#3fb950'
+  ctx.fillText('true = ' + trueValue.toFixed(2), w - pad.right, pad.top + 14)
+  ctx.fillStyle = '#f97583'
+  ctx.fillText('mean = ' + m.toFixed(3), w - pad.right, pad.top + 28)
+}
+
+// ── Main ───────────────────────────────────────────────────────
+
+async function main() {
+  await tf.ready()
+  setStatus('Generating synthetic data...')
+  await new Promise(r => setTimeout(r, 50))
+
+  const { distributions, mcmc, bijectors } = stoch
+
+  // ── Generate data: y = 4x + 2 + noise ──
+
+  const TRUE_SLOPE = 4
+  const TRUE_INTERCEPT = 2
+  const TRUE_SIGMA = 0.5
+  const N = 50
+
+  const xArr = []
+  const yArr = []
+  for (let i = 0; i < N; i++) {
+    const x = (Math.random() * 4) - 1  // x in [-1, 3]
+    const y = TRUE_SLOPE * x + TRUE_INTERCEPT + (Math.random() + Math.random() + Math.random() - 1.5) * TRUE_SIGMA * 1.63
+    xArr.push(x)
+    yArr.push(y)
+  }
+
+  const xData = tf.tensor1d(xArr)
+  const yData = tf.tensor1d(yArr)
+
+  // Draw initial scatter
+  drawScatter('scatter', xArr, yArr, null, TRUE_SLOPE, TRUE_INTERCEPT)
+
+  setStatus('Setting up HMC kernel...')
+  await new Promise(r => setTimeout(r, 50))
+
+  // ── Target log probability ──
+
+  const targetLogProb = ({ slope, intercept, sigma }) => {
+    return tf.tidy(() => {
+      const yPred = tf.add(tf.mul(slope, xData), intercept)
+      const residuals = tf.sub(yData, yPred)
+      // Manual Normal log prob to avoid creating/disposing distribution objects in hot loop
+      const logLik = tf.sum(
+        tf.sub(
+          tf.mul(-0.5, tf.square(tf.div(residuals, sigma))),
+          tf.add(tf.log(sigma), 0.5 * Math.log(2 * Math.PI))
+        )
+      )
+      // Priors: N(0, 10) for slope/intercept
+      const priorSlope = tf.mul(-0.5, tf.square(tf.div(slope, 10)))
+      const priorIntercept = tf.mul(-0.5, tf.square(tf.div(intercept, 10)))
+      // LogNormal(0, 1) prior for sigma: logP(sigma) = -log(sigma) - 0.5*log(sigma)^2 - 0.5*log(2pi)
+      const logSigma = tf.log(sigma)
+      const priorSigma = tf.sub(tf.mul(-0.5, tf.square(logSigma)), logSigma)
+      return tf.addN([logLik, priorSlope, priorIntercept, priorSigma])
+    })
+  }
+
+  // ── HMC with step size adaptation + bijector for sigma > 0 ──
+
+  const NUM_RESULTS = 500
+  const NUM_BURNIN = 300
+
+  const kernel = new mcmc.DualAveragingStepSizeAdaptation({
+    innerKernel: new mcmc.TransformedTransitionKernel({
+      innerKernel: new mcmc.HamiltonianMonteCarlo({
+        targetLogProbFn: targetLogProb,
+        stepSize: 0.05,
+        numLeapfrogSteps: 10
+      }),
+      bijectors: { sigma: new bijectors.Exp() }
+    }),
+    numAdaptationSteps: NUM_BURNIN
+  })
+
+  setStatus(`Running HMC: ${NUM_BURNIN} burn-in + ${NUM_RESULTS} samples...`)
+  await new Promise(r => setTimeout(r, 50))
+
+  const startTime = performance.now()
+
+  const { samples } = mcmc.sampleChain({
+    numResults: NUM_RESULTS,
+    numBurninSteps: NUM_BURNIN,
+    currentState: {
+      slope: tf.scalar(0),
+      intercept: tf.scalar(0),
+      sigma: tf.scalar(1)
+    },
+    kernel
+  })
+
+  const elapsed = ((performance.now() - startTime) / 1000).toFixed(1)
+
+  // ── Extract results ──
+
+  const slopeArr = Array.from(samples.slope.dataSync())
+  const interceptArr = Array.from(samples.intercept.dataSync())
+  const sigmaArr = Array.from(samples.sigma.dataSync())
+
+  // Dispose sample tensors
+  samples.slope.dispose()
+  samples.intercept.dispose()
+  samples.sigma.dispose()
+  xData.dispose()
+  yData.dispose()
+
+  setStatus(`Done in ${elapsed}s. ${NUM_RESULTS} posterior samples collected.`, true)
+
+  // ── Draw results ──
+
+  // Posterior regression lines (subsample 100 for plotting)
+  const lines = []
+  const step = Math.max(1, Math.floor(slopeArr.length / 100))
+  for (let i = 0; i < slopeArr.length; i += step) {
+    lines.push({ slope: slopeArr[i], intercept: interceptArr[i] })
+  }
+  drawScatter('scatter', xArr, yArr, lines, TRUE_SLOPE, TRUE_INTERCEPT)
+
+  // Histograms
+  drawHistogram('hist-slope', slopeArr, TRUE_SLOPE, 'Slope')
+  drawHistogram('hist-intercept', interceptArr, TRUE_INTERCEPT, 'Intercept')
+  drawHistogram('hist-sigma', sigmaArr, TRUE_SIGMA, 'Sigma')
+
+  // Summary table
+  const params = [
+    { name: 'Slope', true: TRUE_SLOPE, samples: slopeArr },
+    { name: 'Intercept', true: TRUE_INTERCEPT, samples: interceptArr },
+    { name: 'Sigma (&sigma;)', true: TRUE_SIGMA, samples: sigmaArr }
+  ]
+
+  let html = ''
+  for (const p of params) {
+    const m = mean(p.samples)
+    const s = std(p.samples)
+    const lo = percentile(p.samples, 0.025)
+    const hi = percentile(p.samples, 0.975)
+    html += `<tr>
+      <td>${p.name}</td>
+      <td class="true-val">${p.true.toFixed(2)}</td>
+      <td class="value">${m.toFixed(3)}</td>
+      <td class="value">${s.toFixed(3)}</td>
+      <td class="value">[${lo.toFixed(3)}, ${hi.toFixed(3)}]</td>
+    </tr>`
+  }
+  document.getElementById('summary-body').innerHTML = html
+}
+
+main().catch(err => {
+  setStatus('Error: ' + err.message, true)
+  console.error(err)
+})
+</script>
+
+</body>
+</html>

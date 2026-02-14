@@ -1,0 +1,6 @@
+export * from './numeric'
+export * from './generic'
+export * from './special'
+export { ndtri } from './ndtri'
+export { cholesky } from './linalg'
+export { triangularSolve } from './triangularSolve'

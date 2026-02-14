@@ -1,0 +1,1450 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>stoch Visual Tests</title>
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body {
+  background: #0f1117; color: #e1e4e8;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif;
+  padding-top: 64px;
+}
+
+/* Top bar */
+.top-bar {
+  position: fixed; top: 0; left: 0; right: 0; z-index: 100;
+  background: #161b22; border-bottom: 1px solid #30363d;
+  padding: 12px 24px; display: flex; align-items: center; gap: 16px;
+  height: 60px;
+}
+.top-bar h1 { font-size: 16px; color: #f0f6fc; white-space: nowrap; }
+.run-btn {
+  background: #238636; border: 1px solid #2ea043; color: #fff;
+  padding: 6px 16px; border-radius: 6px; font-size: 13px; font-weight: 600;
+  cursor: pointer; white-space: nowrap;
+}
+.run-btn:hover { background: #2ea043; }
+.run-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+.progress-dots { display: flex; gap: 6px; flex-shrink: 0; }
+.dot {
+  width: 28px; height: 28px; border-radius: 50%; display: flex;
+  align-items: center; justify-content: center;
+  font-size: 11px; font-weight: 600;
+  border: 2px solid #30363d; color: #484f58; background: transparent;
+  transition: all 0.3s;
+}
+.dot.running { border-color: #58a6ff; color: #58a6ff; animation: pulse 1.2s infinite; }
+.dot.pass { border-color: #3fb950; color: #3fb950; background: rgba(63,185,80,0.1); }
+.dot.fail { border-color: #f85149; color: #f85149; background: rgba(248,81,73,0.1); }
+@keyframes pulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(88,166,255,0.4); }
+  50% { box-shadow: 0 0 0 6px rgba(88,166,255,0); }
+}
+.status-text { font-size: 13px; color: #8b949e; white-space: nowrap; margin-left: auto; }
+
+/* Test blocks */
+.test-block {
+  background: #161b22; border: 1px solid #30363d; border-radius: 8px;
+  padding: 20px; margin: 16px 24px;
+}
+.test-header { display: flex; align-items: center; gap: 12px; margin-bottom: 4px; }
+.test-header h3 { font-size: 15px; color: #f0f6fc; }
+.badge {
+  font-size: 11px; padding: 2px 8px; border-radius: 4px; font-weight: 600;
+  white-space: nowrap;
+}
+.badge.pending { background: rgba(139,148,158,0.15); color: #484f58; }
+.badge.pass { background: rgba(63,185,80,0.15); color: #3fb950; }
+.badge.fail { background: rgba(248,81,73,0.15); color: #f85149; }
+.description { font-size: 13px; color: #8b949e; margin-bottom: 8px; }
+.canvas-wrap { background: #0d1117; border-radius: 6px; overflow: hidden; margin-bottom: 8px; }
+.canvas-wrap canvas { display: block; width: 100%; height: 280px; }
+.canvas-row { display: flex; gap: 1px; background: #0d1117; border-radius: 6px; overflow: hidden; margin-bottom: 8px; }
+.canvas-row canvas { display: block; width: 33.33%; height: 220px; }
+.details {
+  font-family: 'SF Mono', 'Fira Code', 'Consolas', monospace;
+  font-size: 12px; color: #79c0ff; line-height: 1.6;
+}
+.details .label { color: #8b949e; }
+.details .pass-val { color: #3fb950; }
+.details .fail-val { color: #f85149; }
+
+/* Table for math tests & diagnostics */
+.result-table {
+  width: 100%; border-collapse: collapse; font-size: 12px;
+  font-family: 'SF Mono', 'Fira Code', 'Consolas', monospace;
+  margin-bottom: 8px;
+}
+.result-table th {
+  background: #0d1117; color: #8b949e; text-align: left;
+  padding: 6px 10px; border-bottom: 1px solid #30363d; font-weight: 600;
+}
+.result-table td {
+  padding: 5px 10px; border-bottom: 1px solid #21262d; color: #e1e4e8;
+}
+.result-table .cell-pass { color: #3fb950; }
+.result-table .cell-fail { color: #f85149; }
+
+/* Interactive controls */
+.controls {
+  display: flex; flex-wrap: wrap; gap: 10px 16px; align-items: center;
+  margin-bottom: 10px; padding: 8px 12px;
+  background: rgba(13,17,23,0.5); border: 1px solid #21262d; border-radius: 6px;
+}
+.control-group {
+  display: flex; align-items: center; gap: 5px;
+}
+.control-group label {
+  font-size: 11px; color: #8b949e; white-space: nowrap;
+}
+.control-group input[type=range] {
+  width: 90px; accent-color: #58a6ff; height: 4px;
+}
+.control-group select {
+  background: #21262d; border: 1px solid #30363d; color: #e1e4e8;
+  padding: 2px 6px; border-radius: 4px; font-size: 11px;
+}
+.control-group .val {
+  font-size: 11px; color: #58a6ff;
+  font-family: 'SF Mono', 'Fira Code', 'Consolas', monospace;
+  min-width: 32px; text-align: right;
+}
+.control-btn {
+  background: #21262d; border: 1px solid #30363d; color: #e1e4e8;
+  padding: 4px 12px; border-radius: 4px; font-size: 11px; cursor: pointer;
+  font-weight: 500;
+}
+.control-btn:hover { background: #30363d; }
+.control-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+.gp-hint {
+  font-size: 11px; color: #6e7681; font-style: italic;
+}
+.canvas-wrap.gp-canvas canvas { cursor: crosshair; }
+</style>
+</head>
+<body>
+
+<div class="top-bar">
+  <h1>stoch Visual Tests</h1>
+  <button class="run-btn" id="runBtn" onclick="runAllTests()">Run All</button>
+  <div class="progress-dots" id="dots"></div>
+  <div class="status-text" id="statusText">Ready</div>
+</div>
+
+<div id="testContainer"></div>
+
+<script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4/dist/tf.min.js"></script>
+<script src="../dist/stoch.min.js"></script>
+<script>
+'use strict'
+
+// ── Helpers ──
+
+function mean(arr) {
+  let s = 0
+  for (let i = 0; i < arr.length; i++) s += arr[i]
+  return s / arr.length
+}
+
+function std(arr) {
+  const m = mean(arr)
+  let s = 0
+  for (let i = 0; i < arr.length; i++) { const d = arr[i] - m; s += d * d }
+  return Math.sqrt(s / (arr.length - 1))
+}
+
+// ── Control helpers ──
+
+function getCtrl(testIdx, id) {
+  return document.getElementById(`ctrl-${testIdx}-${id}`)
+}
+
+function getCtrlVal(testIdx, id) {
+  const el = getCtrl(testIdx, id)
+  if (!el) return undefined
+  if (el.tagName === 'SELECT') return el.value
+  return parseFloat(el.value)
+}
+
+function updateValDisplay(testIdx, id) {
+  const el = getCtrl(testIdx, id)
+  const display = document.getElementById(`val-${testIdx}-${id}`)
+  if (el && display) {
+    const v = parseFloat(el.value)
+    display.textContent = v % 1 === 0 ? v.toFixed(1) : v.toFixed(2)
+  }
+}
+
+const _rerunTimers = {}
+function rerunTest(i) {
+  clearTimeout(_rerunTimers[i])
+  _rerunTimers[i] = setTimeout(async () => {
+    const block = document.getElementById(`test-${i}`)
+    setDotState(i, 'running')
+    try {
+      const result = await tests[i].run(block)
+      setBadge(block, result.passed)
+      setDotState(i, result.passed ? 'pass' : 'fail')
+    } catch (err) {
+      console.error(`Test ${i + 1} error:`, err)
+      setBadge(block, false, err.message)
+      setDotState(i, 'fail')
+      setDetails(block, `<span class="fail-val">${err.message}</span>`)
+    }
+  }, 80)
+}
+
+// ── Canvas drawing utilities ──
+
+function setupCanvas(canvas) {
+  const dpr = window.devicePixelRatio || 1
+  const rect = canvas.getBoundingClientRect()
+  canvas.width = rect.width * dpr
+  canvas.height = rect.height * dpr
+  const ctx = canvas.getContext('2d')
+  ctx.scale(dpr, dpr)
+  return { ctx, w: rect.width, h: rect.height }
+}
+
+const PAD = { top: 24, right: 20, bottom: 32, left: 50 }
+
+function drawHistogram(ctx, w, h, data, opts = {}) {
+  const nBins = opts.nBins || 40
+  const color = opts.color || '#1f6feb'
+  const refLines = opts.referenceLines || []
+  const pdfFn = opts.pdfFn || null
+  const title = opts.title || ''
+
+  const pL = PAD.left, pR = PAD.right, pT = PAD.top, pB = PAD.bottom
+  const pw = w - pL - pR, ph = h - pT - pB
+
+  let lo = opts.xMin != null ? opts.xMin : Math.min(...data)
+  let hi = opts.xMax != null ? opts.xMax : Math.max(...data)
+  if (hi === lo) { lo -= 1; hi += 1 }
+  const binW = (hi - lo) / nBins
+  const bins = new Array(nBins).fill(0)
+  for (const v of data) {
+    let idx = Math.floor((v - lo) / binW)
+    if (idx < 0) idx = 0
+    if (idx >= nBins) idx = nBins - 1
+    bins[idx]++
+  }
+  const maxBin = Math.max(...bins)
+
+  ctx.fillStyle = '#0d1117'
+  ctx.fillRect(0, 0, w, h)
+
+  ctx.strokeStyle = '#21262d'; ctx.lineWidth = 1
+  for (let i = 0; i <= 4; i++) {
+    const y = pT + (ph * i / 4)
+    ctx.beginPath(); ctx.moveTo(pL, y); ctx.lineTo(pL + pw, y); ctx.stroke()
+  }
+
+  ctx.fillStyle = color
+  ctx.globalAlpha = opts.alpha || 0.7
+  for (let i = 0; i < nBins; i++) {
+    const x = pL + (i / nBins) * pw
+    const bw = pw / nBins - 1
+    const bh = (bins[i] / maxBin) * ph
+    ctx.fillRect(x, pT + ph - bh, bw, bh)
+  }
+  ctx.globalAlpha = 1
+
+  if (pdfFn) {
+    const scale = data.length * binW
+    ctx.strokeStyle = '#e1e4e8'; ctx.lineWidth = 1.5
+    ctx.beginPath()
+    for (let px = 0; px <= pw; px++) {
+      const xVal = lo + (px / pw) * (hi - lo)
+      const yVal = pdfFn(xVal) * scale
+      const sy = pT + ph - (yVal / maxBin) * ph
+      if (px === 0) ctx.moveTo(pL + px, sy); else ctx.lineTo(pL + px, sy)
+    }
+    ctx.stroke()
+  }
+
+  for (const ref of refLines) {
+    const xPx = pL + ((ref.value - lo) / (hi - lo)) * pw
+    if (xPx < pL || xPx > pL + pw) continue
+    ctx.strokeStyle = ref.color || '#3fb950'; ctx.lineWidth = 1.5
+    if (ref.dashed) ctx.setLineDash([4, 4])
+    ctx.beginPath(); ctx.moveTo(xPx, pT); ctx.lineTo(xPx, pT + ph); ctx.stroke()
+    ctx.setLineDash([])
+    if (ref.label) {
+      ctx.fillStyle = ref.color || '#3fb950'; ctx.font = '10px sans-serif'
+      ctx.fillText(ref.label, xPx + 3, pT + 12)
+    }
+  }
+
+  ctx.strokeStyle = '#484f58'; ctx.lineWidth = 1
+  ctx.beginPath()
+  ctx.moveTo(pL, pT + ph); ctx.lineTo(pL + pw, pT + ph)
+  ctx.moveTo(pL, pT); ctx.lineTo(pL, pT + ph)
+  ctx.stroke()
+
+  ctx.fillStyle = '#8b949e'; ctx.font = '10px sans-serif'; ctx.textAlign = 'center'
+  for (let i = 0; i <= 5; i++) {
+    ctx.fillText((lo + (i / 5) * (hi - lo)).toFixed(1), pL + (i / 5) * pw, pT + ph + 14)
+  }
+  ctx.textAlign = 'right'
+  for (let i = 0; i <= 4; i++) {
+    ctx.fillText(Math.round(maxBin * (1 - i / 4)).toString(), pL - 5, pT + (i / 4) * ph + 4)
+  }
+
+  if (title) {
+    ctx.fillStyle = '#e1e4e8'; ctx.font = '12px sans-serif'; ctx.textAlign = 'center'
+    ctx.fillText(title, w / 2, 14)
+  }
+}
+
+function drawMultiHistogram(ctx, w, h, datasets, opts = {}) {
+  const nBins = opts.nBins || 40
+  const refLines = opts.referenceLines || []
+  const pL = PAD.left, pR = PAD.right, pT = PAD.top, pB = PAD.bottom
+  const pw = w - pL - pR, ph = h - pT - pB
+
+  let lo = Infinity, hi = -Infinity
+  for (const ds of datasets) {
+    for (const v of ds.data) { if (v < lo) lo = v; if (v > hi) hi = v }
+  }
+  if (lo === hi) { lo -= 1; hi += 1 }
+  const binW = (hi - lo) / nBins
+
+  const allBins = datasets.map(ds => {
+    const bins = new Array(nBins).fill(0)
+    for (const v of ds.data) {
+      let idx = Math.floor((v - lo) / binW)
+      if (idx < 0) idx = 0; if (idx >= nBins) idx = nBins - 1
+      bins[idx]++
+    }
+    return bins
+  })
+  let maxBin = 0
+  for (const bins of allBins) for (const b of bins) if (b > maxBin) maxBin = b
+
+  ctx.fillStyle = '#0d1117'; ctx.fillRect(0, 0, w, h)
+
+  ctx.strokeStyle = '#21262d'; ctx.lineWidth = 1
+  for (let i = 0; i <= 4; i++) {
+    const y = pT + (ph * i / 4)
+    ctx.beginPath(); ctx.moveTo(pL, y); ctx.lineTo(pL + pw, y); ctx.stroke()
+  }
+
+  for (let d = 0; d < datasets.length; d++) {
+    ctx.fillStyle = datasets[d].color || '#58a6ff'; ctx.globalAlpha = 0.45
+    for (let i = 0; i < nBins; i++) {
+      const x = pL + (i / nBins) * pw
+      const bw = pw / nBins - 1
+      const bh = (allBins[d][i] / maxBin) * ph
+      ctx.fillRect(x, pT + ph - bh, bw, bh)
+    }
+  }
+  ctx.globalAlpha = 1
+
+  for (const ref of refLines) {
+    const xPx = pL + ((ref.value - lo) / (hi - lo)) * pw
+    if (xPx < pL || xPx > pL + pw) continue
+    ctx.strokeStyle = ref.color || '#3fb950'; ctx.lineWidth = 1.5
+    ctx.setLineDash([4, 4])
+    ctx.beginPath(); ctx.moveTo(xPx, pT); ctx.lineTo(xPx, pT + ph); ctx.stroke()
+    ctx.setLineDash([])
+    if (ref.label) {
+      ctx.fillStyle = ref.color || '#3fb950'; ctx.font = '10px sans-serif'
+      ctx.fillText(ref.label, xPx + 3, pT + 12)
+    }
+  }
+
+  ctx.strokeStyle = '#484f58'; ctx.lineWidth = 1
+  ctx.beginPath()
+  ctx.moveTo(pL, pT + ph); ctx.lineTo(pL + pw, pT + ph)
+  ctx.moveTo(pL, pT); ctx.lineTo(pL, pT + ph)
+  ctx.stroke()
+
+  ctx.fillStyle = '#8b949e'; ctx.font = '10px sans-serif'; ctx.textAlign = 'center'
+  for (let i = 0; i <= 5; i++) {
+    ctx.fillText((lo + (i / 5) * (hi - lo)).toFixed(1), pL + (i / 5) * pw, pT + ph + 14)
+  }
+
+  let lx = pL + 8
+  for (const ds of datasets) {
+    ctx.fillStyle = ds.color
+    ctx.fillRect(lx, pT + 4, 10, 10)
+    ctx.fillStyle = '#e1e4e8'; ctx.font = '10px sans-serif'; ctx.textAlign = 'left'
+    ctx.fillText(ds.label, lx + 14, pT + 13)
+    lx += ctx.measureText(ds.label).width + 30
+  }
+}
+
+function drawScatter(ctx, w, h, xs, ys, opts = {}) {
+  const color = opts.color || '#58a6ff'
+  const refLines = opts.referenceLines || []
+  const pL = PAD.left, pR = PAD.right, pT = PAD.top, pB = PAD.bottom
+  const pw = w - pL - pR, ph = h - pT - pB
+
+  let xLo = Math.min(...xs), xHi = Math.max(...xs)
+  let yLo = Math.min(...ys), yHi = Math.max(...ys)
+  const xPad = (xHi - xLo) * 0.1 || 1, yPad = (yHi - yLo) * 0.1 || 1
+  xLo -= xPad; xHi += xPad; yLo -= yPad; yHi += yPad
+
+  ctx.fillStyle = '#0d1117'; ctx.fillRect(0, 0, w, h)
+
+  ctx.strokeStyle = '#21262d'; ctx.lineWidth = 1
+  for (let i = 0; i <= 4; i++) {
+    const y = pT + (ph * i / 4)
+    ctx.beginPath(); ctx.moveTo(pL, y); ctx.lineTo(pL + pw, y); ctx.stroke()
+    const x = pL + (pw * i / 4)
+    ctx.beginPath(); ctx.moveTo(x, pT); ctx.lineTo(x, pT + ph); ctx.stroke()
+  }
+
+  for (const ref of refLines) {
+    ctx.strokeStyle = ref.color || '#3fb950'; ctx.lineWidth = 1.5
+    ctx.setLineDash([4, 4])
+    if (ref.type === 'vline') {
+      const xPx = pL + ((ref.value - xLo) / (xHi - xLo)) * pw
+      ctx.beginPath(); ctx.moveTo(xPx, pT); ctx.lineTo(xPx, pT + ph); ctx.stroke()
+    } else if (ref.type === 'hline') {
+      const yPx = pT + ph - ((ref.value - yLo) / (yHi - yLo)) * ph
+      ctx.beginPath(); ctx.moveTo(pL, yPx); ctx.lineTo(pL + pw, yPx); ctx.stroke()
+    }
+    ctx.setLineDash([])
+  }
+
+  ctx.fillStyle = color; ctx.globalAlpha = 0.5
+  for (let i = 0; i < xs.length; i++) {
+    const px = pL + ((xs[i] - xLo) / (xHi - xLo)) * pw
+    const py = pT + ph - ((ys[i] - yLo) / (yHi - yLo)) * ph
+    ctx.beginPath(); ctx.arc(px, py, 2.5, 0, 2 * Math.PI); ctx.fill()
+  }
+  ctx.globalAlpha = 1
+
+  ctx.strokeStyle = '#484f58'; ctx.lineWidth = 1
+  ctx.beginPath()
+  ctx.moveTo(pL, pT + ph); ctx.lineTo(pL + pw, pT + ph)
+  ctx.moveTo(pL, pT); ctx.lineTo(pL, pT + ph)
+  ctx.stroke()
+
+  ctx.fillStyle = '#8b949e'; ctx.font = '10px sans-serif'; ctx.textAlign = 'center'
+  for (let i = 0; i <= 4; i++) {
+    ctx.fillText((xLo + (i / 4) * (xHi - xLo)).toFixed(1), pL + (i / 4) * pw, pT + ph + 14)
+  }
+  ctx.textAlign = 'right'
+  for (let i = 0; i <= 4; i++) {
+    ctx.fillText((yHi - (i / 4) * (yHi - yLo)).toFixed(1), pL - 5, pT + (i / 4) * ph + 4)
+  }
+
+  if (opts.xLabel) {
+    ctx.fillStyle = '#8b949e'; ctx.font = '11px sans-serif'; ctx.textAlign = 'center'
+    ctx.fillText(opts.xLabel, pL + pw / 2, h - 4)
+  }
+  if (opts.yLabel) {
+    ctx.save(); ctx.fillStyle = '#8b949e'; ctx.font = '11px sans-serif'
+    ctx.translate(12, pT + ph / 2); ctx.rotate(-Math.PI / 2)
+    ctx.textAlign = 'center'; ctx.fillText(opts.yLabel, 0, 0)
+    ctx.restore()
+  }
+}
+
+function drawLineChart(ctx, w, h, series, opts = {}) {
+  const pL = PAD.left, pR = PAD.right, pT = PAD.top, pB = PAD.bottom
+  const pw = w - pL - pR, ph = h - pT - pB
+
+  let xLo = Infinity, xHi = -Infinity, yLo = Infinity, yHi = -Infinity
+  for (const s of series) {
+    for (const x of s.xs) { if (x < xLo) xLo = x; if (x > xHi) xHi = x }
+    for (const y of s.ys) { if (isFinite(y)) { if (y < yLo) yLo = y; if (y > yHi) yHi = y } }
+    if (s.upper) for (const y of s.upper) { if (isFinite(y) && y > yHi) yHi = y }
+    if (s.lower) for (const y of s.lower) { if (isFinite(y) && y < yLo) yLo = y }
+  }
+  if (opts.yMin != null) yLo = opts.yMin
+  if (opts.yMax != null) yHi = opts.yMax
+  const yPad = (yHi - yLo) * 0.05 || 0.5
+  yLo -= yPad; yHi += yPad
+
+  const toX = v => pL + ((v - xLo) / (xHi - xLo || 1)) * pw
+  const toY = v => pT + ph - ((v - yLo) / (yHi - yLo || 1)) * ph
+
+  ctx.fillStyle = '#0d1117'; ctx.fillRect(0, 0, w, h)
+
+  ctx.strokeStyle = '#21262d'; ctx.lineWidth = 1
+  for (let i = 0; i <= 4; i++) {
+    const y = pT + (ph * i / 4)
+    ctx.beginPath(); ctx.moveTo(pL, y); ctx.lineTo(pL + pw, y); ctx.stroke()
+  }
+
+  for (const s of series) {
+    if (s.upper && s.lower) {
+      ctx.fillStyle = s.color || '#58a6ff'; ctx.globalAlpha = 0.15
+      ctx.beginPath()
+      for (let i = 0; i < s.xs.length; i++) {
+        const px = toX(s.xs[i]), py = toY(s.upper[i])
+        if (i === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py)
+      }
+      for (let i = s.xs.length - 1; i >= 0; i--) {
+        ctx.lineTo(toX(s.xs[i]), toY(s.lower[i]))
+      }
+      ctx.closePath(); ctx.fill(); ctx.globalAlpha = 1
+    }
+  }
+
+  for (const s of series) {
+    if (s.scatter) {
+      ctx.fillStyle = s.color || '#58a6ff'
+      for (let i = 0; i < s.xs.length; i++) {
+        ctx.beginPath(); ctx.arc(toX(s.xs[i]), toY(s.ys[i]), s.pointRadius || 3, 0, 2 * Math.PI); ctx.fill()
+      }
+      continue
+    }
+    ctx.strokeStyle = s.color || '#58a6ff'
+    ctx.lineWidth = s.lineWidth || 2
+    if (s.dashed) ctx.setLineDash([6, 4])
+    ctx.beginPath()
+    for (let i = 0; i < s.xs.length; i++) {
+      const px = toX(s.xs[i]), py = toY(s.ys[i])
+      if (i === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py)
+    }
+    ctx.stroke(); ctx.setLineDash([])
+  }
+
+  ctx.strokeStyle = '#484f58'; ctx.lineWidth = 1
+  ctx.beginPath()
+  ctx.moveTo(pL, pT + ph); ctx.lineTo(pL + pw, pT + ph)
+  ctx.moveTo(pL, pT); ctx.lineTo(pL, pT + ph)
+  ctx.stroke()
+
+  ctx.fillStyle = '#8b949e'; ctx.font = '10px sans-serif'; ctx.textAlign = 'center'
+  for (let i = 0; i <= 5; i++) {
+    const val = xLo + (i / 5) * (xHi - xLo)
+    ctx.fillText(opts.xLog ? Math.round(val).toString() : val.toFixed(1), pL + (i / 5) * pw, pT + ph + 14)
+  }
+  ctx.textAlign = 'right'
+  for (let i = 0; i <= 4; i++) {
+    const val = yHi - (i / 4) * (yHi - yLo)
+    ctx.fillText(val.toFixed(2), pL - 5, pT + (i / 4) * ph + 4)
+  }
+
+  let lx = pL + 8
+  for (const s of series) {
+    if (!s.label) continue
+    if (s.scatter) {
+      ctx.fillStyle = s.color || '#58a6ff'
+      ctx.beginPath(); ctx.arc(lx + 4, pT + 10, 3, 0, 2 * Math.PI); ctx.fill()
+      lx += 12
+    } else {
+      ctx.strokeStyle = s.color || '#58a6ff'; ctx.lineWidth = 2
+      if (s.dashed) ctx.setLineDash([4, 3])
+      ctx.beginPath(); ctx.moveTo(lx, pT + 10); ctx.lineTo(lx + 16, pT + 10); ctx.stroke()
+      ctx.setLineDash([])
+      lx += 20
+    }
+    ctx.fillStyle = '#e1e4e8'; ctx.font = '10px sans-serif'; ctx.textAlign = 'left'
+    ctx.fillText(s.label, lx, pT + 13)
+    lx += ctx.measureText(s.label).width + 16
+  }
+
+  if (opts.xLabel) {
+    ctx.fillStyle = '#8b949e'; ctx.font = '11px sans-serif'; ctx.textAlign = 'center'
+    ctx.fillText(opts.xLabel, pL + pw / 2, h - 4)
+  }
+}
+
+// ── UI helpers ──
+
+const NUM_TESTS = 10
+
+function initUI() {
+  const dots = document.getElementById('dots')
+  for (let i = 0; i < NUM_TESTS; i++) {
+    const d = document.createElement('span')
+    d.className = 'dot'; d.id = `dot-${i}`; d.textContent = i + 1
+    dots.appendChild(d)
+  }
+}
+
+function setDotState(idx, state) {
+  document.getElementById(`dot-${idx}`).className = 'dot ' + state
+}
+
+function setStatus(text) {
+  document.getElementById('statusText').textContent = text
+}
+
+function setBadge(block, passed, msg) {
+  const badge = block.querySelector('.badge')
+  badge.className = 'badge ' + (passed ? 'pass' : 'fail')
+  badge.textContent = passed ? 'PASS' : ('FAIL' + (msg ? ': ' + msg : ''))
+}
+
+function setDetails(block, html) {
+  block.querySelector('.details').innerHTML = html
+}
+
+function detailLine(label, computed, expected, pass) {
+  const cls = pass ? 'pass-val' : 'fail-val'
+  return `<span class="label">${label}:</span> <span class="${cls}">${computed}</span> <span class="label">(expected: ${expected})</span>`
+}
+
+// ── Test definitions ──
+
+const tests = []
+const testState = {}
+let hmcSamplesX = null, hmcSamplesY = null
+let _allTestsRunning = false
+
+// Test 1: Normal Distribution Sampling
+tests.push({
+  name: 'Normal Distribution Sampling',
+  desc: 'Sample 5000 values from Normal(loc, scale), verify mean and std, overlay theoretical PDF.',
+  canvasCount: 1,
+  controls: [
+    { type: 'range', id: 'loc', label: 'loc', min: -5, max: 5, step: 0.1, value: 0 },
+    { type: 'range', id: 'scale', label: 'scale', min: 0.1, max: 5, step: 0.1, value: 1 }
+  ],
+  liveRerun: true,
+  async run(block) {
+    const loc = getCtrlVal(0, 'loc') ?? 0
+    const scale = getCtrlVal(0, 'scale') ?? 1
+
+
+    const normal = new stoch.distributions.Normal({ loc, scale })
+    const samples = normal.sample([5000])
+    const data = Array.from(samples.dataSync())
+    samples.dispose(); normal.dispose()
+
+    const m = mean(data), s = std(data)
+    const canvas = block.querySelector('canvas')
+    const { ctx, w, h } = setupCanvas(canvas)
+
+    drawHistogram(ctx, w, h, data, {
+      nBins: 50, color: '#1f6feb',
+      referenceLines: [
+        { value: loc, color: '#3fb950', label: 'mean=' + loc.toFixed(1) },
+        { value: loc - scale, color: '#d29922', label: '-1\u03c3', dashed: true },
+        { value: loc + scale, color: '#d29922', label: '+1\u03c3', dashed: true }
+      ],
+      pdfFn: x => Math.exp(-0.5 * ((x - loc) / scale) ** 2) / (scale * Math.sqrt(2 * Math.PI))
+    })
+
+    const mOk = Math.abs(m - loc) < 0.15 * scale + 0.05
+    const sOk = Math.abs(s - scale) < 0.15 * scale + 0.05
+    const passed = mOk && sOk
+    setDetails(block,
+      detailLine('Sample mean', m.toFixed(4), loc.toFixed(1), mOk) + '<br>' +
+      detailLine('Sample std', s.toFixed(4), scale.toFixed(1), sOk)
+    )
+    return { passed }
+  }
+})
+
+// Test 2: Distribution Shape Comparison
+tests.push({
+  name: 'Distribution Shape Comparison',
+  desc: 'Sample from Beta(\u03b1,\u03b2), Gamma(\u03b1,\u03b2), Exponential(rate). Verify means match theory.',
+  canvasCount: 1,
+  controls: [
+    { type: 'range', id: 'ba', label: 'Beta \u03b1', min: 0.1, max: 10, step: 0.1, value: 2 },
+    { type: 'range', id: 'bb', label: '\u03b2', min: 0.1, max: 10, step: 0.1, value: 5 },
+    { type: 'range', id: 'ga', label: 'Gamma \u03b1', min: 0.1, max: 10, step: 0.1, value: 2 },
+    { type: 'range', id: 'gb', label: '\u03b2', min: 0.1, max: 10, step: 0.1, value: 2 },
+    { type: 'range', id: 'er', label: 'Exp rate', min: 0.1, max: 5, step: 0.1, value: 1 }
+  ],
+  liveRerun: true,
+  async run(block) {
+    const ba = getCtrlVal(1, 'ba') ?? 2
+    const bb = getCtrlVal(1, 'bb') ?? 5
+    const ga = getCtrlVal(1, 'ga') ?? 2
+    const gb = getCtrlVal(1, 'gb') ?? 2
+    const er = getCtrlVal(1, 'er') ?? 1
+
+
+    const beta = new stoch.distributions.Beta({ concentration1: ba, concentration0: bb })
+    const gamma = new stoch.distributions.Gamma({ concentration: ga, rate: gb })
+    const expo = new stoch.distributions.Exponential({ rate: er })
+
+    const bSamples = beta.sample([5000])
+    const gSamples = gamma.sample([5000])
+    const eSamples = expo.sample([5000])
+
+    const bData = Array.from(bSamples.dataSync())
+    const gData = Array.from(gSamples.dataSync())
+    const eData = Array.from(eSamples.dataSync())
+
+    bSamples.dispose(); gSamples.dispose(); eSamples.dispose()
+    beta.dispose(); gamma.dispose(); expo.dispose()
+
+    const bMean = mean(bData), gMean = mean(gData), eMean = mean(eData)
+    const bTheo = ba / (ba + bb), gTheo = ga / gb, eTheo = 1 / er
+
+    const canvas = block.querySelector('canvas')
+    const { ctx, w, h } = setupCanvas(canvas)
+
+    drawMultiHistogram(ctx, w, h, [
+      { data: bData, color: '#58a6ff', label: `Beta(${ba},${bb})` },
+      { data: gData, color: '#3fb950', label: `Gamma(${ga},${gb})` },
+      { data: eData, color: '#d29922', label: `Exp(${er})` }
+    ], {
+      nBins: 50,
+      referenceLines: [
+        { value: bTheo, color: '#58a6ff', label: '\u03b2=' + bTheo.toFixed(2), dashed: true },
+        { value: gTheo, color: '#3fb950', label: '\u03b3=' + gTheo.toFixed(2), dashed: true },
+        { value: eTheo, color: '#d29922', label: 'e=' + eTheo.toFixed(2), dashed: true }
+      ]
+    })
+
+    const bOk = Math.abs(bMean - bTheo) < 0.05 + 0.1 * bTheo
+    const gOk = Math.abs(gMean - gTheo) < 0.15 + 0.1 * gTheo
+    const eOk = Math.abs(eMean - eTheo) < 0.15 + 0.1 * eTheo
+    const passed = bOk && gOk && eOk
+    setDetails(block,
+      detailLine('Beta mean', bMean.toFixed(4), bTheo.toFixed(4), bOk) + '<br>' +
+      detailLine('Gamma mean', gMean.toFixed(4), gTheo.toFixed(4), gOk) + '<br>' +
+      detailLine('Exp mean', eMean.toFixed(4), eTheo.toFixed(4), eOk)
+    )
+    return { passed }
+  }
+})
+
+// Test 3: Bijector Forward/Inverse Roundtrip
+tests.push({
+  name: 'Bijector Forward/Inverse Roundtrip',
+  desc: 'Apply a bijector to Normal(0, scale) via TransformedDistribution. Verify roundtrip and samples.',
+  canvasCount: 1,
+  controls: [
+    { type: 'select', id: 'bij', label: 'Bijector', options: ['Exp', 'Softplus', 'Sigmoid'], value: 'Exp' },
+    { type: 'range', id: 'scale', label: 'base scale', min: 0.1, max: 3, step: 0.1, value: 0.5 }
+  ],
+  liveRerun: true,
+  async run(block) {
+    const bijEl = getCtrl(2, 'bij')
+    const bijName = bijEl ? bijEl.value : 'Exp'
+    const scale = getCtrlVal(2, 'scale') ?? 0.5
+
+
+
+
+    const base = new stoch.distributions.Normal({ loc: 0, scale })
+    const bijector = new stoch.bijectors[bijName]()
+    const transformed = new stoch.distributions.TransformedDistribution({ distribution: base, bijector })
+
+    const samples = transformed.sample([3000])
+    const data = Array.from(samples.dataSync())
+    samples.dispose()
+
+    // Roundtrip test
+    const testPts = tf.tensor1d([0.5, 1.0, 2.0, 3.0])
+    const fwd = bijector._forward(testPts)
+    const inv = bijector._inverse(fwd)
+    const rtErr = tf.sub(inv, testPts).abs().max().dataSync()[0]
+    testPts.dispose(); fwd.dispose(); inv.dispose()
+
+    transformed.dispose()
+
+    const sampleMean = mean(data)
+    // Theoretical mean only known for Exp (LogNormal)
+    let theoMean = null
+    if (bijName === 'Exp') theoMean = Math.exp(0.5 * scale * scale)
+
+    const canvas = block.querySelector('canvas')
+    const { ctx, w, h } = setupCanvas(canvas)
+
+    const refLines = []
+    if (theoMean != null) refLines.push({ value: theoMean, color: '#3fb950', label: 'E=' + theoMean.toFixed(3) })
+
+    const lo = Math.min(...data), hi = Math.max(...data)
+    drawHistogram(ctx, w, h, data, {
+      nBins: 50, color: '#a371f7',
+      xMin: Math.max(lo, -0.5), xMax: Math.min(hi, lo + (hi - lo) * 0.95 + 0.5),
+      referenceLines: refLines
+    })
+
+    const rtOk = rtErr < 1e-4
+    const mOk = theoMean != null ? Math.abs(sampleMean - theoMean) < 0.15 + 0.1 * theoMean : true
+    const passed = rtOk && mOk
+    setDetails(block,
+      detailLine('Roundtrip error', rtErr.toExponential(2), '<1e-4', rtOk) + '<br>' +
+      detailLine('Sample mean', sampleMean.toFixed(4), theoMean != null ? theoMean.toFixed(4) : 'n/a', mOk) +
+      ` <span class="label">[${bijName}]</span>`
+    )
+    return { passed }
+  }
+})
+
+// Test 4: KL Divergence
+tests.push({
+  name: 'KL Divergence',
+  desc: 'Compute KL(Normal(0,1) || Normal(q_loc, q_scale)) analytically and via Monte Carlo.',
+  canvasCount: 1,
+  controls: [
+    { type: 'range', id: 'qloc', label: 'q loc', min: -3, max: 3, step: 0.1, value: 1 },
+    { type: 'range', id: 'qscale', label: 'q scale', min: 0.1, max: 3, step: 0.1, value: 1 }
+  ],
+  liveRerun: true,
+  async run(block) {
+    const qLoc = getCtrlVal(3, 'qloc') ?? 1
+    const qScale = getCtrlVal(3, 'qscale') ?? 1
+
+
+    const p = new stoch.distributions.Normal({ loc: 0, scale: 1 })
+    const q = new stoch.distributions.Normal({ loc: qLoc, scale: qScale })
+
+    const klTensor = stoch.distributions.klDivergence(p, q)
+    const klVal = klTensor.dataSync()[0]
+    klTensor.dispose()
+
+    // Analytical: KL(N(0,1)||N(m,s)) = log(s) + (1 + m^2)/(2s^2) - 0.5
+    const klExpected = Math.log(qScale) + (1 + qLoc * qLoc) / (2 * qScale * qScale) - 0.5
+
+    const sizes = [100, 500, 1000, 2000, 5000, 10000]
+    const mcEstimates = []
+    for (const n of sizes) {
+      const est = tf.tidy(() => {
+        const z = p.sample([n])
+        return tf.mean(tf.sub(p.logProb(z), q.logProb(z)))
+      })
+      mcEstimates.push(est.dataSync()[0])
+      est.dispose()
+    }
+    p.dispose(); q.dispose()
+
+    const canvas = block.querySelector('canvas')
+    const { ctx, w, h } = setupCanvas(canvas)
+
+    drawLineChart(ctx, w, h, [
+      { xs: sizes, ys: mcEstimates, color: '#58a6ff', label: 'MC estimate' },
+      { xs: [sizes[0], sizes[sizes.length-1]], ys: [klExpected, klExpected], color: '#3fb950', dashed: true, label: `Analytical (${klExpected.toFixed(3)})`, lineWidth: 1.5 }
+    ], { xLabel: 'Sample size', xLog: true })
+
+    const klOk = Math.abs(klVal - klExpected) < 1e-3
+    const mcOk = Math.abs(mcEstimates[mcEstimates.length - 1] - klExpected) < 0.2 + 0.1 * Math.abs(klExpected)
+    const passed = klOk && mcOk
+    setDetails(block,
+      detailLine('KL analytical', klVal.toFixed(6), klExpected.toFixed(6), klOk) + '<br>' +
+      detailLine('MC (n=10000)', mcEstimates[mcEstimates.length - 1].toFixed(4), klExpected.toFixed(4), mcOk)
+    )
+    return { passed }
+  }
+})
+
+// Test 5: Special Math Functions
+tests.push({
+  name: 'Special Math Functions',
+  desc: 'Evaluate logGamma, digamma, ndtr, ndtri, logAddExp at known reference points.',
+  canvasCount: 0,
+  useTable: true,
+  async run(block) {
+    const { logGamma, digamma, ndtr, ndtri, logAddExp } = stoch.math
+    const checks = []
+
+    function check(fn, label, input, expected) {
+      const t = tf.scalar(input)
+      const result = fn(t)
+      const computed = result.dataSync()[0]
+      result.dispose(); t.dispose()
+      const err = Math.abs(computed - expected)
+      checks.push({ fn: label, input: input.toString(), expected, computed, err, ok: err < 1e-3 })
+    }
+
+    check(logGamma, 'logGamma', 1, 0)
+    check(logGamma, 'logGamma', 5, Math.log(24))
+    check(logGamma, 'logGamma', 0.5, Math.log(Math.sqrt(Math.PI)))
+    check(digamma, 'digamma', 1, -0.5772156649)
+    check(digamma, 'digamma', 2, 0.4227843351)
+    check(ndtr, 'ndtr', 0, 0.5)
+    check(ndtr, 'ndtr', 1.96, 0.97500210)
+    check(ndtri, 'ndtri', 0.5, 0)
+    check(ndtri, 'ndtri', 0.975, 1.95996398)
+
+    const a = tf.scalar(1), b = tf.scalar(2)
+    const lae = logAddExp(a, b)
+    const laeVal = lae.dataSync()[0]
+    const laeExp = Math.log(Math.exp(1) + Math.exp(2))
+    lae.dispose(); a.dispose(); b.dispose()
+    checks.push({ fn: 'logAddExp', input: '1, 2', expected: laeExp, computed: laeVal, err: Math.abs(laeVal - laeExp), ok: Math.abs(laeVal - laeExp) < 1e-3 })
+
+    const table = block.querySelector('.result-table')
+    let html = '<tr><th>Function</th><th>Input</th><th>Expected</th><th>Computed</th><th>Error</th><th></th></tr>'
+    for (const c of checks) {
+      const cls = c.ok ? 'cell-pass' : 'cell-fail'
+      html += `<tr><td>${c.fn}</td><td>${c.input}</td><td>${c.expected.toFixed(6)}</td><td>${c.computed.toFixed(6)}</td><td class="${cls}">${c.err.toExponential(2)}</td><td class="${cls}">${c.ok ? '\u2713' : '\u2717'}</td></tr>`
+    }
+    table.innerHTML = html
+
+    const maxErr = Math.max(...checks.map(c => c.err))
+    const passed = checks.every(c => c.ok)
+    setDetails(block,
+      detailLine('Max error', maxErr.toExponential(2), '<1e-3', passed) +
+      ` <span class="label">(${checks.length} test points)</span>`
+    )
+    return { passed }
+  }
+})
+
+// Test 6: MCMC Sampling (HMC)
+tests.push({
+  name: 'MCMC Sampling (HMC)',
+  desc: 'Sample from a 2D correlated Gaussian using HMC with step-size adaptation.',
+  canvasCount: 1,
+  controls: [
+    { type: 'range', id: 'mx', label: 'target \u03bcx', min: -3, max: 3, step: 0.1, value: 1 },
+    { type: 'range', id: 'my', label: 'target \u03bcy', min: -3, max: 5, step: 0.1, value: 2 },
+    { type: 'button', id: 'resample', label: 'Re-sample' }
+  ],
+  async run(block) {
+    const mx = getCtrlVal(5, 'mx') ?? 1
+    const my = getCtrlVal(5, 'my') ?? 2
+
+
+    const targetLogProb = (state) => {
+      return tf.tidy(() => {
+        const dx = tf.sub(state.x, mx)
+        const dy = tf.sub(state.y, my)
+        const q = tf.add(
+          tf.add(tf.mul(tf.square(dx), 4/7), tf.mul(tf.mul(dx, dy), -2/7)),
+          tf.mul(tf.square(dy), 2/7)
+        )
+        return tf.mul(-0.5, q)
+      })
+    }
+
+    const kernel = new stoch.mcmc.DualAveragingStepSizeAdaptation({
+      innerKernel: new stoch.mcmc.HamiltonianMonteCarlo({
+        targetLogProbFn: targetLogProb,
+        stepSize: 0.15,
+        numLeapfrogSteps: 5
+      }),
+      numAdaptationSteps: 200
+    })
+
+    const { samples } = stoch.mcmc.sampleChain({
+      numResults: 300,
+      numBurninSteps: 200,
+      currentState: { x: tf.scalar(0), y: tf.scalar(0) },
+      kernel
+    })
+
+    const xArr = Array.from(samples.x.dataSync())
+    const yArr = Array.from(samples.y.dataSync())
+    samples.x.dispose(); samples.y.dispose()
+
+    hmcSamplesX = xArr; hmcSamplesY = yArr
+
+    const canvas = block.querySelector('canvas')
+    const { ctx, w, h } = setupCanvas(canvas)
+
+    drawScatter(ctx, w, h, xArr, yArr, {
+      color: '#58a6ff', xLabel: 'x', yLabel: 'y',
+      referenceLines: [
+        { type: 'vline', value: mx, color: '#3fb950' },
+        { type: 'hline', value: my, color: '#3fb950' }
+      ]
+    })
+
+    const xMean = mean(xArr), yMean = mean(yArr)
+    const xOk = Math.abs(xMean - mx) < 0.4
+    const yOk = Math.abs(yMean - my) < 0.5
+    const passed = xOk && yOk
+    setDetails(block,
+      detailLine('Mean x', xMean.toFixed(3), mx.toFixed(1), xOk) + '<br>' +
+      detailLine('Mean y', yMean.toFixed(3), my.toFixed(1), yOk) +
+      ` <span class="label">(300 samples, 200 burn-in)</span>`
+    )
+    return { passed }
+  }
+})
+
+// Test 7: MCMC Diagnostics
+tests.push({
+  name: 'MCMC Diagnostics',
+  desc: 'Compute ESS, R-hat (split-chain), HDI, and MCSE from HMC samples.',
+  canvasCount: 0,
+  useTable: true,
+  async run(block) {
+    const { effectiveSampleSize, potentialScaleReduction } = stoch.mcmc
+    const { hdi, summary } = stoch.stats
+
+    let xArr = hmcSamplesX, yArr = hmcSamplesY
+    if (!xArr || !yArr) {
+      xArr = []; yArr = []
+      let cx = 1, cy = 2
+      for (let i = 0; i < 300; i++) {
+        cx = 0.8 * cx + 0.2 + 0.5 * (Math.random() - 0.5)
+        cy = 0.8 * cy + 0.4 + 0.7 * (Math.random() - 0.5)
+        xArr.push(cx); yArr.push(cy)
+      }
+    }
+
+    const essX = effectiveSampleSize(xArr)
+    const essY = effectiveSampleSize(yArr)
+    const midX = Math.floor(xArr.length / 2)
+    const rhatX = potentialScaleReduction([xArr.slice(0, midX), xArr.slice(midX)])
+    const rhatY = potentialScaleReduction([yArr.slice(0, midX), yArr.slice(midX)])
+    const hdiX = hdi(xArr, 0.94)
+    const hdiY = hdi(yArr, 0.94)
+    const summ = summary({ x: xArr, y: yArr })
+
+    const table = block.querySelector('.result-table')
+    const rows = [
+      { name: 'x', ess: essX, rhat: rhatX, hdi: hdiX, mcse: summ.x.mcse },
+      { name: 'y', ess: essY, rhat: rhatY, hdi: hdiY, mcse: summ.y.mcse }
+    ]
+
+    let html = '<tr><th>Param</th><th>ESS</th><th>R-hat</th><th>94% HDI</th><th>MCSE</th></tr>'
+    for (const r of rows) {
+      const essCls = r.ess > 10 ? 'cell-pass' : 'cell-fail'
+      const rhatCls = r.rhat < 1.3 ? 'cell-pass' : 'cell-fail'
+      html += `<tr><td>${r.name}</td><td class="${essCls}">${r.ess.toFixed(1)}</td><td class="${rhatCls}">${r.rhat.toFixed(4)}</td><td>[${r.hdi[0].toFixed(3)}, ${r.hdi[1].toFixed(3)}]</td><td>${r.mcse.toFixed(4)}</td></tr>`
+    }
+    table.innerHTML = html
+
+    const passed = essX > 10 && essY > 10 && rhatX < 1.3 && rhatY < 1.3
+    setDetails(block,
+      detailLine('ESS(x)', essX.toFixed(1), '>10', essX > 10) + '<br>' +
+      detailLine('R-hat(x)', rhatX.toFixed(4), '<1.3', rhatX < 1.3)
+    )
+    return { passed }
+  }
+})
+
+// Test 8: Variational Inference
+tests.push({
+  name: 'Variational Inference',
+  desc: 'Fit a mean-field Normal to a target Normal(loc, scale) using ELBO optimization.',
+  canvasCount: 1,
+  controls: [
+    { type: 'range', id: 'tloc', label: 'target loc', min: 0, max: 6, step: 0.1, value: 3 },
+    { type: 'range', id: 'tscale', label: 'target scale', min: 0.1, max: 3, step: 0.1, value: 0.5 },
+    { type: 'button', id: 'rerun', label: 'Re-run' }
+  ],
+  async run(block) {
+    const tLoc = getCtrlVal(7, 'tloc') ?? 3
+    const tScale = getCtrlVal(7, 'tscale') ?? 0.5
+    const { buildMeanFieldPosterior, fitSurrogatePosterior } = stoch.vi
+
+    const targetLogProb = ({ z }) => {
+      return tf.tidy(() => {
+        const norm = tf.div(tf.sub(z, tLoc), tScale)
+        return tf.add(tf.mul(-0.5, tf.square(norm)), tf.scalar(-Math.log(tScale) - 0.5 * Math.log(2 * Math.PI)))
+      })
+    }
+
+    const surrogate = buildMeanFieldPosterior({ z: 0 }, { initialScale: 2 })
+    const optimizer = tf.train.adam(0.05)
+
+    const { losses } = fitSurrogatePosterior({
+      targetLogProbFn: targetLogProb,
+      surrogatePosterior: surrogate,
+      optimizer,
+      numSteps: 200,
+      numElboSamples: 3
+    })
+
+    const params = surrogate.getParameters()
+    surrogate.dispose()
+
+    const canvas = block.querySelector('canvas')
+    const { ctx, w, h } = setupCanvas(canvas)
+
+    const elbos = losses.map(l => -l)
+    const steps = elbos.map((_, i) => i)
+
+    drawLineChart(ctx, w, h, [
+      { xs: steps, ys: elbos, color: '#58a6ff', label: 'ELBO' }
+    ], { xLabel: 'Step' })
+
+    const locOk = Math.abs(params.z.loc - tLoc) < 0.5
+    const scaleOk = Math.abs(params.z.scale - tScale) < 0.5
+    const passed = locOk && scaleOk
+    setDetails(block,
+      detailLine('Fitted loc', params.z.loc.toFixed(4), tLoc.toFixed(1), locOk) + '<br>' +
+      detailLine('Fitted scale', params.z.scale.toFixed(4), tScale.toFixed(1), scaleOk)
+    )
+    return { passed }
+  }
+})
+
+// Test 9: GP Regression (interactive click-to-add)
+tests.push({
+  name: 'GP Regression',
+  desc: 'Fit a GP with SE kernel. Click canvas to add points, Shift+click to remove nearest.',
+  canvasCount: 1,
+  gpCanvas: true,
+  controls: [
+    { type: 'range', id: 'ls', label: 'lengthScale', min: 0.1, max: 5, step: 0.1, value: 1 },
+    { type: 'range', id: 'amp', label: 'amplitude', min: 0.1, max: 5, step: 0.1, value: 1 },
+    { type: 'range', id: 'noise', label: 'noise', min: 0.01, max: 1, step: 0.01, value: 0.1 },
+    { type: 'button', id: 'clear', label: 'Clear' },
+    { type: 'button', id: 'reset', label: 'Reset sin(x)' }
+  ],
+  liveRerun: true,
+  async run(block) {
+    const { SquaredExponential, GaussianProcessRegressionModel } = stoch.gp
+    const ls = getCtrlVal(8, 'ls') ?? 1
+    const amp = getCtrlVal(8, 'amp') ?? 1
+    const noise = getCtrlVal(8, 'noise') ?? 0.1
+
+    // Initialize state on first run
+    if (!testState[8]) {
+      const xTrain = [], yTrain = []
+      for (let i = 0; i < 20; i++) {
+        const x = -5 + 10 * i / 19
+        xTrain.push(x)
+        yTrain.push(Math.sin(x) + (Math.random() - 0.5) * 0.3)
+      }
+      testState[8] = { xTrain, yTrain }
+    }
+
+    const { xTrain, yTrain } = testState[8]
+
+    // GP x range
+    const GP_XMIN = -7, GP_XMAX = 7
+    const N_TEST = 80
+    const xTest = []
+    for (let i = 0; i < N_TEST; i++) xTest.push(GP_XMIN + (GP_XMAX - GP_XMIN) * i / (N_TEST - 1))
+    const trueSin = xTest.map(x => Math.sin(x))
+
+    const canvas = block.querySelector('canvas')
+    const { ctx, w, h } = setupCanvas(canvas)
+
+    if (xTrain.length < 2) {
+      // No data — show prior (just sin reference and empty plot)
+      drawLineChart(ctx, w, h, [
+        { xs: xTest, ys: trueSin, color: '#3fb950', dashed: true, label: 'sin(x)', lineWidth: 1.5 },
+        ...(xTrain.length > 0 ? [{ xs: xTrain, ys: yTrain, color: '#f0f6fc', scatter: true, pointRadius: 4, label: 'Training data' }] : [])
+      ], { yMin: -3, yMax: 3 })
+      setDetails(block, '<span class="label">Add more points by clicking the canvas</span>')
+      return { passed: true }
+    }
+
+    const xTrainT = tf.tensor2d(xTrain.map(x => [x]))
+    const yTrainT = tf.tensor1d(yTrain)
+    const xTestT = tf.tensor2d(xTest.map(x => [x]))
+
+    const kernel = new SquaredExponential({ amplitude: amp, lengthScale: ls })
+    const gprm = new GaussianProcessRegressionModel({
+      kernel, indexPoints: xTrainT, observations: yTrainT,
+      observationNoiseVariance: noise
+    })
+
+    const { mean: predMean, covariance: predCov } = gprm.predict(xTestT)
+    const predMeanArr = Array.from(predMean.dataSync())
+    const predCovData = predCov.dataSync()
+    const predStd = []
+    for (let i = 0; i < N_TEST; i++) {
+      predStd.push(Math.sqrt(Math.max(0, predCovData[i * N_TEST + i])))
+    }
+
+    predMean.dispose(); predCov.dispose()
+    xTrainT.dispose(); yTrainT.dispose(); xTestT.dispose()
+
+    drawLineChart(ctx, w, h, [
+      { xs: xTest, ys: predMeanArr, upper: predMeanArr.map((m, i) => m + 2 * predStd[i]), lower: predMeanArr.map((m, i) => m - 2 * predStd[i]), color: '#58a6ff', label: 'GP mean \u00b1 2\u03c3' },
+      { xs: xTest, ys: predMeanArr, color: '#58a6ff', lineWidth: 2 },
+      { xs: xTest, ys: trueSin, color: '#3fb950', dashed: true, label: 'sin(x)', lineWidth: 1.5 },
+      { xs: xTrain, ys: yTrain, color: '#f0f6fc', scatter: true, pointRadius: 4, label: 'Training data' }
+    ])
+
+    let rmse = 0
+    for (let i = 0; i < N_TEST; i++) rmse += (predMeanArr[i] - trueSin[i]) ** 2
+    rmse = Math.sqrt(rmse / N_TEST)
+
+    const passed = rmse < 0.5
+    setDetails(block,
+      detailLine('RMSE vs sin(x)', rmse.toFixed(4), '<0.5', passed) +
+      ` <span class="label">(${xTrain.length} points, ls=${ls}, amp=${amp})</span>`
+    )
+    return { passed }
+  }
+})
+
+// Test 10: Joint Distribution
+tests.push({
+  name: 'Joint Distribution (Hierarchical)',
+  desc: 'Hierarchical model: \u03bc~Normal(0,s), \u03c3~Gamma(a,b), x~Normal(\u03bc,\u03c3). Verify marginals.',
+  canvasCount: 3,
+  controls: [
+    { type: 'range', id: 'ps', label: '\u03bc prior scale', min: 0.5, max: 10, step: 0.5, value: 5 },
+    { type: 'range', id: 'gc', label: '\u03c3 conc.', min: 0.1, max: 5, step: 0.1, value: 2 },
+    { type: 'range', id: 'gr', label: '\u03c3 rate', min: 0.1, max: 5, step: 0.1, value: 1 }
+  ],
+  liveRerun: true,
+  async run(block) {
+    const ps = getCtrlVal(9, 'ps') ?? 5
+    const gc = getCtrlVal(9, 'gc') ?? 2
+    const gr = getCtrlVal(9, 'gr') ?? 1
+
+
+    const model = new stoch.distributions.JointDistributionNamed({
+      mu: () => new stoch.distributions.Normal({ loc: 0, scale: ps }),
+      sigma: () => new stoch.distributions.Gamma({ concentration: gc, rate: gr }),
+      x: ({ mu, sigma }) => new stoch.distributions.Normal({ loc: mu, scale: sigma })
+    })
+
+    const N = 3000
+    const allMu = [], allSigma = [], allX = []
+    for (let i = 0; i < N; i++) {
+      const s = model.sample()
+      allMu.push(s.mu.dataSync()[0])
+      allSigma.push(s.sigma.dataSync()[0])
+      allX.push(s.x.dataSync()[0])
+      s.mu.dispose(); s.sigma.dispose(); s.x.dispose()
+    }
+
+    const testSample = { mu: tf.scalar(1), sigma: tf.scalar(2), x: tf.scalar(1.5) }
+    const lp = model.logProb(testSample)
+    const lpVal = lp.dataSync()[0]
+    lp.dispose()
+    testSample.mu.dispose(); testSample.sigma.dispose(); testSample.x.dispose()
+    model.dispose()
+
+    const sigmaTheo = gc / gr
+    const canvases = block.querySelectorAll('canvas')
+    const datasets = [
+      { data: allMu, title: `\u03bc ~ Normal(0, ${ps})`, color: '#58a6ff', theoMean: 0 },
+      { data: allSigma, title: `\u03c3 ~ Gamma(${gc}, ${gr})`, color: '#3fb950', theoMean: sigmaTheo },
+      { data: allX, title: 'x ~ Normal(\u03bc, \u03c3)', color: '#d29922', theoMean: 0 }
+    ]
+
+    for (let i = 0; i < 3; i++) {
+      const { ctx, w, h } = setupCanvas(canvases[i])
+      drawHistogram(ctx, w, h, datasets[i].data, {
+        nBins: 40, color: datasets[i].color, title: datasets[i].title,
+        referenceLines: [{ value: datasets[i].theoMean, color: '#f85149', label: 'E=' + datasets[i].theoMean.toFixed(1) }]
+      })
+    }
+
+    const muMean = mean(allMu), sigmaMean = mean(allSigma), xMean = mean(allX)
+    const muOk = Math.abs(muMean) < 0.5 + 0.1 * ps
+    const sigmaOk = Math.abs(sigmaMean - sigmaTheo) < 0.3 + 0.1 * sigmaTheo
+    const xOk = Math.abs(xMean) < 1.0 + 0.1 * ps
+    const lpOk = isFinite(lpVal) && lpVal < 0
+    const passed = muOk && sigmaOk && xOk && lpOk
+
+    setDetails(block,
+      detailLine('E[\u03bc]', muMean.toFixed(3), '0', muOk) + '&ensp;' +
+      detailLine('E[\u03c3]', sigmaMean.toFixed(3), sigmaTheo.toFixed(1), sigmaOk) + '&ensp;' +
+      detailLine('E[x]', xMean.toFixed(3), '0', xOk) + '<br>' +
+      detailLine('logProb(test)', lpVal.toFixed(3), 'finite & <0', lpOk)
+    )
+    return { passed }
+  }
+})
+
+// ── Build test blocks ──
+
+function buildControlsHTML(testIdx, controls) {
+  if (!controls || controls.length === 0) return ''
+  let html = '<div class="controls">'
+  for (const c of controls) {
+    if (c.type === 'range') {
+      const displayVal = c.value % 1 === 0 ? c.value.toFixed(1) : c.value.toFixed(2)
+      html += `<div class="control-group">
+        <label>${c.label}</label>
+        <input type="range" id="ctrl-${testIdx}-${c.id}" min="${c.min}" max="${c.max}" step="${c.step}" value="${c.value}">
+        <span class="val" id="val-${testIdx}-${c.id}">${displayVal}</span>
+      </div>`
+    } else if (c.type === 'select') {
+      html += `<div class="control-group"><label>${c.label}</label><select id="ctrl-${testIdx}-${c.id}">`
+      for (const opt of c.options) {
+        html += `<option value="${opt}" ${opt === c.value ? 'selected' : ''}>${opt}</option>`
+      }
+      html += '</select></div>'
+    } else if (c.type === 'button') {
+      html += `<button class="control-btn" id="ctrl-${testIdx}-${c.id}">${c.label}</button>`
+    }
+  }
+  html += '</div>'
+  return html
+}
+
+function buildTestBlocks() {
+  const container = document.getElementById('testContainer')
+  for (let i = 0; i < tests.length; i++) {
+    const t = tests[i]
+    const div = document.createElement('div')
+    div.className = 'test-block'
+    div.id = `test-${i}`
+
+    let vizHTML = ''
+    if (t.useTable) {
+      vizHTML = '<table class="result-table"></table>'
+    } else if (t.canvasCount === 3) {
+      vizHTML = '<div class="canvas-row"><canvas></canvas><canvas></canvas><canvas></canvas></div>'
+    } else if (t.canvasCount >= 1) {
+      vizHTML = `<div class="canvas-wrap${t.gpCanvas ? ' gp-canvas' : ''}"><canvas></canvas></div>`
+    }
+
+    const controlsHTML = buildControlsHTML(i, t.controls)
+    const gpHint = t.gpCanvas ? '<p class="gp-hint">Click to add points \u2022 Shift+click to remove nearest</p>' : ''
+
+    div.innerHTML = `
+      <div class="test-header">
+        <h3>${i + 1}. ${t.name}</h3>
+        <span class="badge pending">PENDING</span>
+      </div>
+      <p class="description">${t.desc}</p>
+      ${controlsHTML}
+      ${gpHint}
+      ${vizHTML}
+      <div class="details"></div>
+    `
+    container.appendChild(div)
+  }
+}
+
+function wireControls() {
+  for (let i = 0; i < tests.length; i++) {
+    const t = tests[i]
+    if (!t.controls) continue
+
+    for (const c of t.controls) {
+      const el = getCtrl(i, c.id)
+      if (!el) continue
+
+      if (c.type === 'range') {
+        const idx = i
+        el.addEventListener('input', () => {
+          updateValDisplay(idx, c.id)
+          if (t.liveRerun) rerunTest(idx)
+        })
+      } else if (c.type === 'select') {
+        const idx = i
+        el.addEventListener('change', () => {
+          if (t.liveRerun) rerunTest(idx)
+        })
+      } else if (c.type === 'button') {
+        const idx = i
+        if (c.id === 'resample' || c.id === 'rerun') {
+          el.addEventListener('click', () => rerunTest(idx))
+        } else if (c.id === 'clear') {
+          el.addEventListener('click', () => {
+            if (testState[8]) { testState[8].xTrain = []; testState[8].yTrain = [] }
+            rerunTest(8)
+          })
+        } else if (c.id === 'reset') {
+          el.addEventListener('click', () => {
+            const xTrain = [], yTrain = []
+            for (let j = 0; j < 20; j++) {
+              const x = -5 + 10 * j / 19
+              xTrain.push(x)
+              yTrain.push(Math.sin(x) + (Math.random() - 0.5) * 0.3)
+            }
+            testState[8] = { xTrain, yTrain }
+            rerunTest(8)
+          })
+        }
+      }
+    }
+  }
+
+  // GP canvas click handler
+  const gpBlock = document.getElementById('test-8')
+  if (gpBlock) {
+    const canvas = gpBlock.querySelector('canvas')
+    canvas.addEventListener('click', (e) => {
+      if (!testState[8]) return
+      const rect = canvas.getBoundingClientRect()
+      const px = e.clientX - rect.left
+      const py = e.clientY - rect.top
+      const pL = PAD.left, pR = PAD.right, pT = PAD.top, pB = PAD.bottom
+      const pw = rect.width - pL - pR
+      const ph = rect.height - pT - pB
+
+      // GP range
+      const GP_XMIN = -7, GP_XMAX = 7
+      // Compute y range from current data
+      const { xTrain, yTrain } = testState[8]
+      let yLo = -3, yHi = 3
+      // Match the drawLineChart y range logic: scan all visible data
+      const allY = [...yTrain, -1, 1]  // include some baseline
+      const ls = getCtrlVal(8, 'ls') ?? 1
+      const amp = getCtrlVal(8, 'amp') ?? 1
+      // Approximate y range similar to what the chart would use
+      for (const y of allY) { if (y < yLo) yLo = y; if (y > yHi) yHi = y }
+      const yPad = (yHi - yLo) * 0.05 || 0.5
+      yLo -= yPad; yHi += yPad
+
+      const dataX = GP_XMIN + ((px - pL) / pw) * (GP_XMAX - GP_XMIN)
+      const dataY = yHi - ((py - pT) / ph) * (yHi - yLo)
+
+      // Bounds check
+      if (px < pL || px > pL + pw || py < pT || py > pT + ph) return
+
+      if (e.shiftKey) {
+        // Remove nearest point
+        if (xTrain.length === 0) return
+        let minDist = Infinity, minIdx = -1
+        for (let i = 0; i < xTrain.length; i++) {
+          const d = (xTrain[i] - dataX) ** 2 + (yTrain[i] - dataY) ** 2
+          if (d < minDist) { minDist = d; minIdx = i }
+        }
+        if (minIdx >= 0) {
+          xTrain.splice(minIdx, 1)
+          yTrain.splice(minIdx, 1)
+        }
+      } else {
+        // Add point
+        xTrain.push(dataX)
+        yTrain.push(dataY)
+      }
+
+      rerunTest(8)
+    })
+  }
+}
+
+// ── Execution engine ──
+
+async function runAllTests() {
+  const btn = document.getElementById('runBtn')
+  btn.disabled = true
+  _allTestsRunning = true
+
+  hmcSamplesX = null; hmcSamplesY = null
+  // Reset GP state for fresh run
+  testState[8] = null
+
+  for (let i = 0; i < NUM_TESTS; i++) {
+    setDotState(i, '')
+    const block = document.getElementById(`test-${i}`)
+    block.querySelector('.badge').className = 'badge pending'
+    block.querySelector('.badge').textContent = 'PENDING'
+    block.querySelector('.details').innerHTML = ''
+  }
+
+  const results = []
+  for (let i = 0; i < tests.length; i++) {
+    setDotState(i, 'running')
+    setStatus(`Running test ${i + 1}/${NUM_TESTS}...`)
+    const block = document.getElementById(`test-${i}`)
+
+    try {
+      const result = await tests[i].run(block)
+      results.push(result)
+      setBadge(block, result.passed)
+      setDotState(i, result.passed ? 'pass' : 'fail')
+    } catch (err) {
+      console.error(`Test ${i + 1} error:`, err)
+      setBadge(block, false, err.message)
+      setDotState(i, 'fail')
+      setDetails(block, `<span class="fail-val">${err.stack || err.message}</span>`)
+      results.push({ passed: false })
+    }
+
+    await new Promise(r => setTimeout(r, 50))
+  }
+
+  const passed = results.filter(r => r.passed).length
+  setStatus(`Complete: ${passed}/${NUM_TESTS} passed`)
+  btn.disabled = false
+  _allTestsRunning = false
+}
+
+// ── Init ──
+
+initUI()
+buildTestBlocks()
+wireControls()
+</script>
+</body>
+</html>
